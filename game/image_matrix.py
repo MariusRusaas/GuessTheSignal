@@ -92,15 +92,13 @@ class ImageMatrix:
         """Draw the grid and guessed pixels."""
         total_size = self.grid_size * self.pixel_size
 
-        # Draw grid background
-        pygame.draw.rect(
-            surface,
-            COLOR_GRID,
-            (self.top_left[0], self.top_left[1], total_size, total_size)
-        )
+        # Draw grid background (slightly transparent so game background shows through)
+        grid_bg = pygame.Surface((int(total_size), int(total_size)), pygame.SRCALPHA)
+        grid_bg.fill((*COLOR_GRID, 160))
+        surface.blit(grid_bg, (int(self.top_left[0]), int(self.top_left[1])))
 
         # Draw grid lines
-        line_color = (50, 50, 60)
+        line_color = (190, 190, 198)
         for i in range(self.grid_size + 1):
             # Vertical lines
             x = self.top_left[0] + i * self.pixel_size
@@ -118,11 +116,13 @@ class ImageMatrix:
             )
 
         # Draw guessed pixels
+        cell_size = max(1, int(self.pixel_size) - 1)
+
         if show_results and self.true_shape is not None:
             # Show correct/incorrect coloring
             for row, col in self.guessed_pixels:
-                x = self.top_left[0] + col * self.pixel_size
-                y = self.top_left[1] + row * self.pixel_size
+                x = int(self.top_left[0] + col * self.pixel_size)
+                y = int(self.top_left[1] + row * self.pixel_size)
 
                 if self.true_shape[row, col]:
                     color = COLOR_SHAPE_CORRECT
@@ -130,41 +130,42 @@ class ImageMatrix:
                     color = COLOR_SHAPE_WRONG
 
                 # Draw with alpha
-                s = pygame.Surface((self.pixel_size - 1, self.pixel_size - 1), pygame.SRCALPHA)
+                s = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
                 s.fill(color)
-                surface.blit(s, (x + 0.5, y + 0.5))
+                surface.blit(s, (x + 1, y + 1))
 
             # Also show missed pixels (true shape pixels not guessed)
             for row in range(self.grid_size):
                 for col in range(self.grid_size):
                     if self.true_shape[row, col] and (row, col) not in self.guessed_pixels:
-                        x = self.top_left[0] + col * self.pixel_size
-                        y = self.top_left[1] + row * self.pixel_size
+                        x = int(self.top_left[0] + col * self.pixel_size)
+                        y = int(self.top_left[1] + row * self.pixel_size)
 
                         # Draw missed pixels with different color
-                        s = pygame.Surface((self.pixel_size - 1, self.pixel_size - 1), pygame.SRCALPHA)
+                        s = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
                         s.fill((100, 100, 200, 100))  # Blue-ish for missed
-                        surface.blit(s, (x + 0.5, y + 0.5))
+                        surface.blit(s, (x + 1, y + 1))
         else:
             # Normal gameplay - just show guessed pixels
             for row, col in self.guessed_pixels:
-                x = self.top_left[0] + col * self.pixel_size
-                y = self.top_left[1] + row * self.pixel_size
+                x = int(self.top_left[0] + col * self.pixel_size)
+                y = int(self.top_left[1] + row * self.pixel_size)
 
                 # Draw with alpha
-                s = pygame.Surface((self.pixel_size - 1, self.pixel_size - 1), pygame.SRCALPHA)
+                s = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
                 s.fill(COLOR_SHAPE_GUESSED)
-                surface.blit(s, (x + 0.5, y + 0.5))
+                surface.blit(s, (x + 1, y + 1))
 
     def draw_probability_zone(self, surface: pygame.Surface, pixels: list, intensities: list):
         """Draw probability zone highlighting (for tutorial mode)."""
+        cell_size = max(1, int(self.pixel_size) - 1)
         for (row, col), intensity in zip(pixels, intensities):
             if 0 <= row < self.grid_size and 0 <= col < self.grid_size:
-                x = self.top_left[0] + col * self.pixel_size
-                y = self.top_left[1] + row * self.pixel_size
+                x = int(self.top_left[0] + col * self.pixel_size)
+                y = int(self.top_left[1] + row * self.pixel_size)
 
                 # Draw with varying alpha based on intensity
                 alpha = int(intensity * 150)
-                s = pygame.Surface((self.pixel_size - 1, self.pixel_size - 1), pygame.SRCALPHA)
+                s = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
                 s.fill((255, 255, 100, alpha))
-                surface.blit(s, (x + 0.5, y + 0.5))
+                surface.blit(s, (x + 1, y + 1))

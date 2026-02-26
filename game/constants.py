@@ -9,8 +9,8 @@ FPS = 60
 
 # Colors - Light theme
 COLOR_BACKGROUND = (245, 245, 248)  # Almost white with hint of grey
-COLOR_GRID = (40, 40, 50)  # Original dark grid
-COLOR_DETECTOR_IDLE = (80, 80, 90)  # Original dark detectors
+COLOR_GRID = (220, 220, 225)  # Light grey grid to match white layout
+COLOR_DETECTOR_IDLE = (235, 210, 140)  # Light gold detectors
 COLOR_DETECTOR_HIT = (0, 200, 80)  # Green hit
 COLOR_SHAPE_TRUE = (70, 130, 180)  # Steel blue
 COLOR_SHAPE_GUESSED = (200, 100, 100, 150)

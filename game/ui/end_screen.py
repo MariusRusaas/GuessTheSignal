@@ -80,15 +80,15 @@ class EndScreen:
     def _get_score_grade(self) -> tuple:
         """Get grade and color based on DICE score."""
         if self.dice_score >= 0.9:
-            return "Excellent!", (100, 255, 100)
+            return "Excellent!", (20, 140, 20)
         elif self.dice_score >= 0.75:
-            return "Great!", (150, 255, 100)
+            return "Great!", (60, 140, 20)
         elif self.dice_score >= 0.6:
-            return "Good", (255, 255, 100)
+            return "Good", (140, 120, 0)
         elif self.dice_score >= 0.4:
-            return "Fair", (255, 200, 100)
+            return "Fair", (160, 90, 0)
         else:
-            return "Keep Practicing", (255, 150, 100)
+            return "Keep Practicing", (160, 50, 20)
 
     def draw(self):
         """Draw the end screen as an overlay panel on the right side."""
@@ -102,13 +102,13 @@ class EndScreen:
         panel_height = h - int(h * 0.22)
 
         panel_surface = pygame.Surface((panel_width, panel_height), pygame.SRCALPHA)
-        panel_surface.fill((30, 30, 45, 230))
+        panel_surface.fill((238, 238, 243, 245))
         self.renderer.screen.blit(panel_surface, (panel_x, panel_y))
 
         # Draw panel border
         pygame.draw.rect(
             self.renderer.screen,
-            (80, 80, 100),
+            (180, 180, 200),
             (panel_x, panel_y, panel_width, panel_height),
             2,
             border_radius=8

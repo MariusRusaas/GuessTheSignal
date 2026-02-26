@@ -59,9 +59,9 @@ class DetectorRing:
         self.inner_radius = radius - 15  # Inner edge of detector arc
         self.outer_radius = radius + 15  # Outer edge of detector arc
 
-        # Calculate arc angle for each detector
-        self.arc_angle = math.radians(DETECTOR_ARC_ANGLE)
+        # Calculate arc angle for each detector - fill full spacing so detectors are back-to-back
         self.detector_spacing = 2 * math.pi / num_detectors
+        self.arc_angle = self.detector_spacing
 
         # Create detectors
         self.detectors: List[Detector] = []

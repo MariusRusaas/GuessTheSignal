@@ -22,6 +22,7 @@ from game.ui.menu import MainMenu, DifficultySelect
 from game.ui.tutorial import Tutorial
 from game.ui.hud import HUD
 from game.ui.end_screen import EndScreen, CorrectionPhase
+from game.ui.calibration import CalibrationPhase
 
 
 class GameState(Enum):
@@ -29,6 +30,8 @@ class GameState(Enum):
     MENU = auto()
     DIFFICULTY_SELECT = auto()
     TUTORIAL = auto()
+    CALIBRATION = auto()
+    COUNTDOWN = auto()
     PLAYING = auto()
     CORRECTION = auto()
     RESULTS = auto()
@@ -81,6 +84,7 @@ class Game:
         self.main_menu = MainMenu(self.renderer)
         self.difficulty_select = DifficultySelect(self.renderer)
         self.tutorial = Tutorial(self.renderer)
+        self.calibration = CalibrationPhase(self.renderer)
         self.hud = HUD(self.renderer)
         self.end_screen = EndScreen(self.renderer)
         self.correction_ui = CorrectionPhase(self.renderer)
@@ -107,6 +111,7 @@ class Game:
         # Timing
         self.last_emission_time = 0
         self.emissions_fired = 0
+        self._countdown_start = 0
 
         # For tutorial mode probability visualization
         self.show_probability_zone = False
@@ -144,6 +149,11 @@ class Game:
         edge_mask = find_edge_pixels(self.true_shape)
         self.edge_pixels = get_edge_pixel_positions(edge_mask)
 
+        # Fallback: degenerate shapes can yield zero edge pixels; use all shape pixels
+        if not self.edge_pixels:
+            positions = np.argwhere(self.true_shape)
+            self.edge_pixels = [(int(r), int(c)) for r, c in positions]
+
         # Shuffle edge pixels for random emission order
         self.emission_queue = self.edge_pixels.copy()
         random.shuffle(self.emission_queue)
@@ -166,7 +176,23 @@ class Game:
         self.probability_pixels = []
         self.probability_intensities = []
 
-        # Set state to PLAYING (must be last to avoid race conditions)
+        # Set up calibration with the freshly created game objects, then run it
+        self.calibration.setup(self.image_matrix, self.detector_ring)
+        self.state = GameState.CALIBRATION
+
+    def _finish_calibration(self):
+        """Transition from calibration to the countdown, then gameplay."""
+        # Clear any detector hits left over from calibration
+        for d in self.detector_ring.detectors:
+            d.is_hit        = False
+            d.blink_progress = 0.0
+        self.detector_ring.pending_hits.clear()
+        self._countdown_start = pygame.time.get_ticks()
+        self.state = GameState.COUNTDOWN
+
+    def _finish_countdown(self):
+        """Transition from countdown to actual gameplay."""
+        self.last_emission_time = pygame.time.get_ticks()
         self.state = GameState.PLAYING
 
     def fire_emission(self):
@@ -240,6 +266,11 @@ class Game:
                         self.state = GameState.DIFFICULTY_SELECT
                     else:
                         self.state = GameState.MENU
+
+            elif self.state == GameState.CALIBRATION:
+                action = self.calibration.handle_event(event, pygame.time.get_ticks())
+                if action == "done":
+                    self._finish_calibration()
 
             elif self.state == GameState.PLAYING:
                 # HUD pause button - check first
@@ -342,6 +373,16 @@ class Game:
                     self.state = GameState.CORRECTION
                     self.hud.set_correction_phase(True)
 
+        elif self.state == GameState.CALIBRATION:
+            result = self.calibration.update(current_time)
+            if result == "done":
+                self._finish_calibration()
+
+        elif self.state == GameState.COUNTDOWN:
+            # 3.5 s total: "3" / "2" / "1" each for 1 s, "GO!" for 0.5 s
+            if current_time - self._countdown_start >= 3500:
+                self._finish_countdown()
+
         elif self.state == GameState.CORRECTION:
             # Update detector ring (for visual consistency)
             if self.detector_ring:
@@ -357,6 +398,13 @@ class Game:
 
         elif self.state == GameState.TUTORIAL:
             self.tutorial.draw()
+
+        elif self.state == GameState.CALIBRATION:
+            self.calibration.draw(pygame.time.get_ticks())
+
+        elif self.state == GameState.COUNTDOWN:
+            self._draw_game()
+            self._draw_countdown()
 
         elif self.state == GameState.PLAYING:
             self._draw_game()
@@ -374,6 +422,7 @@ class Game:
     def _draw_game(self, correction_phase: bool = False, show_results: bool = False):
         """Draw the main game view."""
         self.renderer.clear()
+        self.renderer.draw_game_background()
 
         # Draw HUD
         self.hud.draw()
@@ -392,6 +441,55 @@ class Game:
 
         # LOR line and emission indicator only shown in tutorial mode
         # In normal gameplay, player must rely on detector blink timing only
+
+    def _draw_countdown(self):
+        """Overlay the 3-2-1-GO! countdown on top of the game board."""
+        import math as _math
+        now = pygame.time.get_ticks()
+        elapsed = now - self._countdown_start
+
+        # Determine which label to show and how far through its 1-second slot we are
+        if elapsed < 1000:
+            label, slot_t = "3", elapsed / 1000.0
+        elif elapsed < 2000:
+            label, slot_t = "2", (elapsed - 1000) / 1000.0
+        elif elapsed < 3000:
+            label, slot_t = "1", (elapsed - 2000) / 1000.0
+        else:
+            label, slot_t = "GO!", (elapsed - 3000) / 500.0
+
+        # Each number pops in large then shrinks slightly; GO! does the reverse
+        if label == "GO!":
+            scale = 1.0 + 0.15 * (1.0 - min(1.0, slot_t))
+            alpha = int(255 * max(0.0, 1.0 - slot_t))
+            color = (20, 140, 60)
+        else:
+            scale = 1.0 + 0.25 * _math.exp(-slot_t * 4)
+            alpha = 255
+            color = (180, 120, 0)
+
+        w, h = constants.WINDOW_WIDTH, constants.WINDOW_HEIGHT
+
+        # Semi-transparent dark vignette so the number pops
+        vignette = pygame.Surface((w, h), pygame.SRCALPHA)
+        vignette.fill((0, 0, 0, 90))
+        self.screen.blit(vignette, (0, 0))
+
+        # Render number at scaled size
+        font_size = max(48, int(h * 0.28 * scale))
+        font = pygame.font.Font(None, font_size)
+        text_surf = font.render(label, True, color)
+        text_surf.set_alpha(alpha)
+        rect = text_surf.get_rect(center=(w // 2, h // 2))
+        self.screen.blit(text_surf, rect)
+
+        # Small instruction line below (only during 3/2/1)
+        if label != "GO!":
+            hint_font = pygame.font.Font(None, max(20, int(h * 0.032)))
+            hint = hint_font.render("Get ready to mark the signal source!", True, (60, 60, 70))
+            hint.set_alpha(200)
+            hrect = hint.get_rect(center=(w // 2, h // 2 + int(h * 0.17)))
+            self.screen.blit(hint, hrect)
 
     def run(self):
         """Main game loop."""

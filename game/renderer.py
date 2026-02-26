@@ -1,10 +1,14 @@
 """Main rendering logic for the game."""
 
+import os
 import pygame
 import math
 from typing import Tuple, Optional, List
 import game.constants as constants
 from game.constants import COLOR_BACKGROUND, COLOR_LOR_LINE, COLOR_TEXT, LOR_LINE_WIDTH
+
+# Absolute path to the project root (one level above the game/ package)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class Renderer:
@@ -14,6 +18,24 @@ class Renderer:
         self.screen = screen
         self._last_height = 0
         self._update_fonts()
+        self._load_backgrounds()
+
+    def _load_backgrounds(self):
+        """Load background images. Falls back silently if files are missing."""
+        def _load(filename, alpha=None):
+            path = os.path.join(_PROJECT_ROOT, "Images", filename)
+            try:
+                img = pygame.image.load(path).convert()
+                if alpha is not None:
+                    img.set_alpha(alpha)
+                return img
+            except Exception:
+                return None
+
+        # IntroImage: semi-opaque overlay for menu / selection screens
+        self._intro_bg = _load("IntroImage.png", alpha=110)
+        # HalfPET: slightly softened backdrop for the game and calibration screens
+        self._game_bg  = _load("HalfPET.png", alpha=190)
 
     def _update_fonts(self):
         """Update font sizes based on current window height."""
@@ -31,6 +53,22 @@ class Renderer:
     def clear(self):
         """Clear the screen with background color."""
         self.screen.fill(COLOR_BACKGROUND)
+
+    def _blit_centered(self, image: pygame.Surface) -> None:
+        """Blit an image so its centre pixel aligns with the screen centre."""
+        sw, sh = self.screen.get_size()
+        iw, ih = image.get_size()
+        self.screen.blit(image, ((sw - iw) // 2, (sh - ih) // 2))
+
+    def draw_intro_background(self) -> None:
+        """Draw IntroImage centred and semi-opaque (menu / selection screens)."""
+        if self._intro_bg is not None:
+            self._blit_centered(self._intro_bg)
+
+    def draw_game_background(self) -> None:
+        """Draw HalfPET centred at full opacity (game / calibration screens)."""
+        if self._game_bg is not None:
+            self._blit_centered(self._game_bg)
 
     def draw_lor_line(
         self,
@@ -151,7 +189,7 @@ class Renderer:
         # Background
         pygame.draw.rect(
             self.screen,
-            (50, 50, 60),
+            (210, 210, 215),
             (position[0], position[1], width, height),
             border_radius=4
         )
@@ -169,7 +207,7 @@ class Renderer:
         # Border
         pygame.draw.rect(
             self.screen,
-            (80, 80, 90),
+            (180, 180, 190),
             (position[0], position[1], width, height),
             2,
             border_radius=4
@@ -179,7 +217,7 @@ class Renderer:
         self,
         center: Tuple[float, float],
         radius: float,
-        color: Tuple[int, int, int] = (60, 60, 70)
+        color: Tuple[int, int, int] = (180, 180, 190)
     ):
         """Draw a circle outline (for reference)."""
         pygame.draw.circle(self.screen, color, center, int(radius), 1)

@@ -161,22 +161,30 @@ class TutorialAnimation:
         # Random emission angle
         self.emission_angle = math.radians(45)  # Fixed for consistent demo
 
-        # Calculate detector positions
+        # Calculate detector positions via ray-circle intersection from the source.
+        # This ensures the two photons travel in exactly opposite directions from
+        # source_pos, so the LOR between the hit detectors passes through source_pos.
         angle1 = self.emission_angle
         angle2 = self.emission_angle + math.pi
 
-        self.detector1_pos = (
-            center[0] + ring_radius * math.cos(angle1),
-            center[1] + ring_radius * math.sin(angle1)
-        )
-        self.detector2_pos = (
-            center[0] + ring_radius * math.cos(angle2),
-            center[1] + ring_radius * math.sin(angle2)
-        )
+        def ray_ring_intersect(src, ctr, radius, angle):
+            dx = src[0] - ctr[0]
+            dy = src[1] - ctr[1]
+            ux = math.cos(angle)
+            uy = math.sin(angle)
+            b = 2 * (dx * ux + dy * uy)
+            c = dx * dx + dy * dy - radius * radius
+            t = (-b + math.sqrt(b * b - 4 * c)) / 2
+            return (src[0] + t * ux, src[1] + t * uy)
 
-        # Calculate detector indices (for 64 detectors)
-        self.detector1_idx = int((angle1 % (2 * math.pi)) / (2 * math.pi) * 64) % 64
-        self.detector2_idx = int((angle2 % (2 * math.pi)) / (2 * math.pi) * 64) % 64
+        self.detector1_pos = ray_ring_intersect(self.source_pos, center, ring_radius, angle1)
+        self.detector2_pos = ray_ring_intersect(self.source_pos, center, ring_radius, angle2)
+
+        # Detector indices derived from actual angle of hit point relative to ring center
+        det_angle1 = math.atan2(self.detector1_pos[1] - center[1], self.detector1_pos[0] - center[0])
+        det_angle2 = math.atan2(self.detector2_pos[1] - center[1], self.detector2_pos[0] - center[0])
+        self.detector1_idx = int((det_angle1 % (2 * math.pi)) / (2 * math.pi) * 64) % 64
+        self.detector2_idx = int((det_angle2 % (2 * math.pi)) / (2 * math.pi) * 64) % 64
 
         # Initialize photon positions at source
         self.photon1_pos = self.source_pos
@@ -987,7 +995,7 @@ class Tutorial:
         center, ring_radius, anim_size = self._get_animation_layout()
 
         # Draw detector ring background circle
-        pygame.draw.circle(screen, (40, 40, 50),
+        pygame.draw.circle(screen, (180, 180, 190),
                           (int(center[0]), int(center[1])),
                           int(ring_radius + 20), 2)
 
@@ -1000,11 +1008,11 @@ class Tutorial:
             grid_size
         )
         pygame.draw.rect(screen, COLOR_GRID, grid_rect)
-        pygame.draw.rect(screen, (60, 60, 70), grid_rect, 1)
+        pygame.draw.rect(screen, (190, 190, 198), grid_rect, 1)
 
         # Draw detectors (64 detectors)
         num_detectors = 64
-        arc_angle = math.radians(4)
+        arc_angle = 2 * math.pi / num_detectors
         inner_radius = ring_radius - 12
         outer_radius = ring_radius + 12
 
@@ -1073,7 +1081,7 @@ class Tutorial:
                             self.animation.source_pos[1] - splash_radius - 2))
 
                 # Draw source point
-                pygame.draw.circle(screen, (255, 255, 100),
+                pygame.draw.circle(screen, (200, 140, 0),
                                  (int(self.animation.source_pos[0]), int(self.animation.source_pos[1])), 5)
 
         # Draw photons during travel
@@ -1123,7 +1131,7 @@ class Tutorial:
             label_y = lor_mid_y - 30
 
             # Draw arrow pointing to LOR
-            pygame.draw.line(screen, (255, 255, 100),
+            pygame.draw.line(screen, (150, 110, 0),
                            (label_x - 10, label_y + 15),
                            (lor_mid_x + 5, lor_mid_y - 5), 2)
 
@@ -1131,7 +1139,7 @@ class Tutorial:
             self.renderer.draw_text(
                 "Line of Response",
                 (label_x + 50, label_y),
-                (255, 255, 100),
+                (150, 110, 0),
                 font_size="small",
                 center=True
             )
@@ -1205,8 +1213,8 @@ class Tutorial:
         if len(polygon_points) >= 3:
             # Draw filled violin with transparency
             violin_surface = pygame.Surface((constants.WINDOW_WIDTH, constants.WINDOW_HEIGHT), pygame.SRCALPHA)
-            pygame.draw.polygon(violin_surface, (100, 255, 150, 80), polygon_points)
-            pygame.draw.polygon(violin_surface, (100, 255, 150, 150), polygon_points, 2)
+            pygame.draw.polygon(violin_surface, (20, 140, 70, 120), polygon_points)
+            pygame.draw.polygon(violin_surface, (20, 140, 70, 220), polygon_points, 2)
             screen.blit(violin_surface, (0, 0))
 
         # Draw label for TOF
@@ -1216,14 +1224,14 @@ class Tutorial:
         self.renderer.draw_text(
             "TOF Probability",
             (label_x, label_y),
-            (100, 255, 150),
+            (20, 140, 70),
             font_size="small",
             center=False
         )
         self.renderer.draw_text(
             "Distribution",
             (label_x, label_y + 20),
-            (100, 255, 150),
+            (20, 140, 70),
             font_size="small",
             center=False
         )

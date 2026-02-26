@@ -74,6 +74,7 @@ class MainMenu:
         self._create_buttons()
 
         self.renderer.clear()
+        self.renderer.draw_intro_background()
 
         # Title
         self.renderer.draw_text(
@@ -157,6 +158,7 @@ class DifficultySelect:
         self._create_buttons()
 
         self.renderer.clear()
+        self.renderer.draw_intro_background()
 
         w = constants.WINDOW_WIDTH
         h = constants.WINDOW_HEIGHT

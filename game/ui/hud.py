@@ -78,12 +78,12 @@ class HUD:
         # Background
         pygame.draw.rect(
             self.renderer.screen,
-            (30, 30, 40),
+            (235, 235, 240),
             self.rect
         )
         pygame.draw.line(
             self.renderer.screen,
-            (60, 60, 70),
+            (200, 200, 210),
             (0, hud_h),
             (w, hud_h),
             2
