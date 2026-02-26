@@ -180,11 +180,23 @@ class TutorialAnimation:
         self.detector1_pos = ray_ring_intersect(self.source_pos, center, ring_radius, angle1)
         self.detector2_pos = ray_ring_intersect(self.source_pos, center, ring_radius, angle2)
 
-        # Detector indices derived from actual angle of hit point relative to ring center
+        # Detector indices: round to nearest detector so the LOR and the lit detector align
+        num_detectors = 64
         det_angle1 = math.atan2(self.detector1_pos[1] - center[1], self.detector1_pos[0] - center[0])
         det_angle2 = math.atan2(self.detector2_pos[1] - center[1], self.detector2_pos[0] - center[0])
-        self.detector1_idx = int((det_angle1 % (2 * math.pi)) / (2 * math.pi) * 64) % 64
-        self.detector2_idx = int((det_angle2 % (2 * math.pi)) / (2 * math.pi) * 64) % 64
+        self.detector1_idx = round((det_angle1 % (2 * math.pi)) / (2 * math.pi) * num_detectors) % num_detectors
+        self.detector2_idx = round((det_angle2 % (2 * math.pi)) / (2 * math.pi) * num_detectors) % num_detectors
+
+        # Snap photon target positions to the actual detector arc centres so
+        # the LOR line, photon travel, and lit detector all land on the same point
+        self.detector1_pos = (
+            center[0] + ring_radius * math.cos(self.detector1_idx * 2 * math.pi / num_detectors),
+            center[1] + ring_radius * math.sin(self.detector1_idx * 2 * math.pi / num_detectors),
+        )
+        self.detector2_pos = (
+            center[0] + ring_radius * math.cos(self.detector2_idx * 2 * math.pi / num_detectors),
+            center[1] + ring_radius * math.sin(self.detector2_idx * 2 * math.pi / num_detectors),
+        )
 
         # Initialize photon positions at source
         self.photon1_pos = self.source_pos
@@ -586,12 +598,12 @@ class AnnihilationAnimation:
         self.phase = self.PHASE_IDLE
         self.phase_start_time = 0
 
-        # Positron enters from bottom-left, traveling in same direction it exited (toward top-right)
-        # Start position is OPPOSITE of exit angle (where it's coming FROM)
+        # Positron enters from outside the frame, traveling in same direction it exited
+        # (toward upper-right). Start position is opposite of exit angle.
         entry_angle = InjectionAnimation.POSITRON_EXIT_ANGLE + math.pi
         self.positron_start = (
-            0.9 * math.cos(entry_angle),
-            0.9 * math.sin(entry_angle)
+            1.5 * math.cos(entry_angle),
+            1.5 * math.sin(entry_angle)
         )
 
         # Electron stationary position (slightly left of center)
@@ -1245,10 +1257,9 @@ class Tutorial:
         # Animation area center (right side of screen)
         center_x = w * 0.65
         center_y = h * 0.52
-        scale = min(w * 0.28, h * 0.35)  # Scale for converting normalized coords to screen
-
-        # Draw background box for the "zoomed view"
-        box_size = scale * 2.2
+        # Match the frame size used by the other animation pages
+        box_size = min(w * 0.32, h * 0.48)
+        scale = box_size / 2.2  # Scale for converting normalized coords to screen
         box_rect = pygame.Rect(
             center_x - box_size / 2,
             center_y - box_size / 2,
@@ -1302,8 +1313,11 @@ class Tutorial:
             screen.blit(flash_surface, (box_rect.left, box_rect.top))
 
         # Draw particles (electron and positron) during approach phases
+        # Clip to box so the positron (which starts outside) doesn't bleed over the UI
         if anim.phase in (AnnihilationAnimation.PHASE_POSITRON_APPROACH,
                           AnnihilationAnimation.PHASE_FINAL_APPROACH):
+            _old_clip = screen.get_clip()
+            screen.set_clip(box_rect)
             # Electron (blue)
             electron_screen = to_screen(*anim.electron_pos)
 
@@ -1347,6 +1361,8 @@ class Tutorial:
                 font_size="small",
                 center=True
             )
+
+            screen.set_clip(_old_clip)
 
         # Draw photons during emission phase
         if anim.phase >= AnnihilationAnimation.PHASE_PHOTONS:

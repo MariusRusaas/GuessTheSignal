@@ -51,14 +51,17 @@ class PETPhysics:
         """
         dir1, dir2 = emission.get_photon_directions()
 
-        # Find intersection points with detector ring
+        # Intersect with the inner surface of the detector ring — this is the
+        # first physical surface a photon reaches, so it determines which
+        # detector is actually entered rather than which centre is nearest.
+        hit_radius = detector_ring.inner_radius
         hits1 = line_circle_intersection(
             emission.source_pos, dir1,
-            self.ring_center, self.ring_radius
+            self.ring_center, hit_radius
         )
         hits2 = line_circle_intersection(
             emission.source_pos, dir2,
-            self.ring_center, self.ring_radius
+            self.ring_center, hit_radius
         )
 
         if not hits1 or not hits2:

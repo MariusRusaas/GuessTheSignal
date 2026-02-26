@@ -18,8 +18,9 @@ def create_blob(grid_size: int, seed: int = None) -> np.ndarray:
     center_x = grid_size // 2 + np.random.randint(-offset_range, offset_range + 1)
     center_y = grid_size // 2 + np.random.randint(-offset_range, offset_range + 1)
 
-    radius_x = grid_size // 5 + np.random.randint(-grid_size // 12, max(1, grid_size // 12) + 1)
-    radius_y = grid_size // 5 + np.random.randint(-grid_size // 12, max(1, grid_size // 12) + 1)
+    jitter   = max(1, grid_size // 12)
+    radius_x = max(2, grid_size // 5 + np.random.randint(-jitter, jitter + 1))
+    radius_y = max(2, grid_size // 5 + np.random.randint(-jitter, jitter + 1))
 
     # Ellipse equation
     ellipse = ((x - center_x) / max(1, radius_x)) ** 2 + ((y - center_y) / max(1, radius_y)) ** 2 <= 1
@@ -31,7 +32,8 @@ def create_blob(grid_size: int, seed: int = None) -> np.ndarray:
 
     # Combine ellipse with noise
     shape = ellipse.astype(float) * 0.7 + (noise > 0.5).astype(float) * 0.3
-    shape = gaussian_filter(shape, sigma=1.5)
+    blur_sigma = max(0.8, min(1.5, grid_size / 12))
+    shape = gaussian_filter(shape, sigma=blur_sigma)
 
     return (shape > 0.5).astype(bool)
 
@@ -192,7 +194,7 @@ def create_multi_region(grid_size: int, seed: int = None) -> np.ndarray:
 
 
 def generate_shape(shape_type: str, grid_size: int, seed: int = None) -> np.ndarray:
-    """Generate a shape based on type."""
+    """Generate a shape based on type. Retries up to 5 times to ensure a non-empty mask."""
     generators = {
         "blob": create_blob,
         "kidney": create_kidney,
@@ -202,7 +204,17 @@ def generate_shape(shape_type: str, grid_size: int, seed: int = None) -> np.ndar
     }
 
     generator = generators.get(shape_type, create_blob)
-    return generator(grid_size, seed)
+
+    for attempt in range(5):
+        shape = generator(grid_size, seed if attempt == 0 else None)
+        if np.any(shape):
+            return shape
+
+    # Absolute fallback: solid centre circle that is always non-empty
+    y, x = np.ogrid[:grid_size, :grid_size]
+    center = grid_size // 2
+    radius = max(2, grid_size // 4)
+    return ((x - center) ** 2 + (y - center) ** 2 <= radius ** 2)
 
 
 def find_edge_pixels(shape_mask: np.ndarray) -> np.ndarray:

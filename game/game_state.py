@@ -30,6 +30,7 @@ class GameState(Enum):
     MENU = auto()
     DIFFICULTY_SELECT = auto()
     TUTORIAL = auto()
+    TRANSITIONING = auto()
     CALIBRATION = auto()
     COUNTDOWN = auto()
     PLAYING = auto()
@@ -112,6 +113,8 @@ class Game:
         self.last_emission_time = 0
         self.emissions_fired = 0
         self._countdown_start = 0
+        self._transition_start = 0
+        self._transition_difficulty: Optional[str] = None
 
         # For tutorial mode probability visualization
         self.show_probability_zone = False
@@ -177,7 +180,7 @@ class Game:
         self.probability_intensities = []
 
         # Set up calibration with the freshly created game objects, then run it
-        self.calibration.setup(self.image_matrix, self.detector_ring)
+        self.calibration.setup(self.image_matrix, self.detector_ring, self.physics)
         self.state = GameState.CALIBRATION
 
     def _finish_calibration(self):
@@ -257,7 +260,9 @@ class Game:
                 if action == "back":
                     self.state = GameState.MENU
                 elif action in DIFFICULTY_SETTINGS:
-                    self.start_game(action)
+                    self._transition_start = pygame.time.get_ticks()
+                    self._transition_difficulty = action
+                    self.state = GameState.TRANSITIONING
 
             elif self.state == GameState.TUTORIAL:
                 action = self.tutorial.handle_event(event)
@@ -373,6 +378,10 @@ class Game:
                     self.state = GameState.CORRECTION
                     self.hud.set_correction_phase(True)
 
+        elif self.state == GameState.TRANSITIONING:
+            if current_time - self._transition_start >= 2000:
+                self.start_game(self._transition_difficulty)
+
         elif self.state == GameState.CALIBRATION:
             result = self.calibration.update(current_time)
             if result == "done":
@@ -398,6 +407,10 @@ class Game:
 
         elif self.state == GameState.TUTORIAL:
             self.tutorial.draw()
+
+        elif self.state == GameState.TRANSITIONING:
+            progress = min(1.0, (pygame.time.get_ticks() - self._transition_start) / 2000.0)
+            self.renderer.draw_transition_background(progress)
 
         elif self.state == GameState.CALIBRATION:
             self.calibration.draw(pygame.time.get_ticks())

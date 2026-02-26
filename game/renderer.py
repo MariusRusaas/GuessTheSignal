@@ -33,9 +33,26 @@ class Renderer:
                 return None
 
         # IntroImage: semi-opaque overlay for menu / selection screens
-        self._intro_bg = _load("IntroImage.png", alpha=110)
+        self._intro_bg  = _load("IntroImage.png", alpha=110)
         # HalfPET: slightly softened backdrop for the game and calibration screens
-        self._game_bg  = _load("HalfPET.png", alpha=190)
+        self._game_bg   = _load("HalfPET.png", alpha=190)
+        # Raw copies cropped to exactly what _blit_centered shows at zoom=1.
+        # This ensures the transition starts from the identical pixel content
+        # that is already on screen — no visible snap at t=0.
+        sw, sh = self.screen.get_size()
+        def _to_screen_crop(img):
+            if img is None:
+                return None
+            iw, ih = img.get_size()
+            if iw >= sw and ih >= sh:
+                # Same centre-crop that _blit_centered produces
+                cx = (iw - sw) // 2
+                cy = (ih - sh) // 2
+                return img.subsurface(pygame.Rect(cx, cy, sw, sh)).copy()
+            else:
+                return pygame.transform.smoothscale(img, (sw, sh))
+        self._intro_raw = _to_screen_crop(_load("IntroImage.png"))
+        self._game_raw  = _to_screen_crop(_load("HalfPET.png"))
 
     def _update_fonts(self):
         """Update font sizes based on current window height."""
@@ -212,6 +229,61 @@ class Renderer:
             2,
             border_radius=4
         )
+
+    def _blit_zoomed(self, image: pygame.Surface, zoom: float, alpha: int) -> None:
+        """Zoom by cropping the central 1/zoom region and upscaling to screen size.
+
+        Output is always exactly screen-sized so performance is constant regardless
+        of zoom level, eliminating the jitter caused by creating huge surfaces.
+        The image must already be pre-scaled to screen dimensions.
+        """
+        sw, sh = self.screen.get_size()
+        iw, ih = image.get_size()
+        crop_w = max(4, int(iw / zoom))
+        crop_h = max(4, int(ih / zoom))
+        crop_x = (iw - crop_w) // 2
+        crop_y = (ih - crop_h) // 2
+        # Clamp to valid bounds
+        crop_x = max(0, min(crop_x, iw - crop_w))
+        crop_y = max(0, min(crop_y, ih - crop_h))
+        cropped = image.subsurface(pygame.Rect(crop_x, crop_y, crop_w, crop_h))
+        scaled = pygame.transform.smoothscale(cropped, (sw, sh))
+        scaled.set_alpha(alpha)
+        self.screen.blit(scaled, (0, 0))
+
+    def draw_transition_background(self, progress: float) -> None:
+        """Zoom + overlapping morph transition.
+
+        progress: 0.0 (difficulty clicked) → 1.0 (2.0 s later)
+
+        Zoom runs the full duration (ease-out): intro image 1.0 → 3.5×.
+        Morph starts at 0.50 and overlaps with the still-moving zoom:
+          — intro (zooming) fades out
+          — game bg (always unzoomed, 1.0×) fades in underneath
+        """
+        _MORPH_START = 0.82
+        self.screen.fill(COLOR_BACKGROUND)
+
+        # Zoom: ease-out over the full duration so it's still moving during morph
+        ease = 1.0 - (1.0 - progress) ** 2            # ease-out quad
+        zoom = 1.0 + ease * 2.0                        # 1.0 → 3.0×
+
+        if progress <= _MORPH_START:
+            # Zoom only — ramp intro opacity up to fully opaque
+            ramp_t = progress / _MORPH_START           # 0 → 1
+            intro_alpha = int(110 + 145 * ramp_t)      # 110 → 255
+            if self._intro_raw is not None:
+                self._blit_zoomed(self._intro_raw, zoom, intro_alpha)
+        else:
+            # Zoom continues AND game bg bleeds in on top of the (still-zooming) intro.
+            # Intro stays fully opaque — it is covered, not faded out.
+            morph_t    = (progress - _MORPH_START) / (1.0 - _MORPH_START)  # 0 → 1
+            morph_ease = morph_t ** 1.5                  # ease-in: slow start, builds up
+            game_alpha = int(255 * morph_ease)           # 0 → 255, fully covers intro
+            if self._intro_raw is not None:
+                self._blit_zoomed(self._intro_raw, zoom, 255)        # full opacity, still zooming
+            if self._game_raw is not None:
+                self._blit_zoomed(self._game_raw, 1.0, game_alpha)   # bleeds in on top
 
     def draw_ring_outline(
         self,
