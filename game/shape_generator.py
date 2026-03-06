@@ -143,6 +143,104 @@ def create_heart(grid_size: int, seed: int = None) -> np.ndarray:
     return shape
 
 
+def create_bouba(grid_size: int, seed: int = None) -> np.ndarray:
+    """Create an organic bouba-type shape with both concave and convex rounded regions.
+
+    Built from a base circle modulated by several harmonic components with random
+    phase offsets, so every seed produces a different but always-smooth silhouette.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    shape = np.zeros((grid_size, grid_size), dtype=bool)
+    offset_range = max(1, grid_size // 7)
+    center_x = grid_size // 2 + np.random.randint(-offset_range, offset_range + 1)
+    center_y = grid_size // 2 + np.random.randint(-offset_range, offset_range + 1)
+
+    base_radius = grid_size / 4.0
+
+    # Random phase for each harmonic — unique shape per seed
+    phases = np.random.uniform(0, 2 * math.pi, 4)
+
+    # (harmonic order, amplitude as fraction of base_radius)
+    # Low orders create broad concave/convex lobes; mid orders add finer bumps.
+    # Total max amplitude = (0.22+0.18+0.12+0.07)*base = 0.59*base,
+    # so min radius ≈ 0.41*base > 0 — no degenerate shapes.
+    harmonics = [
+        (2, 0.22, phases[0]),
+        (3, 0.18, phases[1]),
+        (4, 0.12, phases[2]),
+        (5, 0.07, phases[3]),
+    ]
+
+    for row in range(grid_size):
+        for col in range(grid_size):
+            dx = col - center_x
+            dy = row - center_y
+            angle = math.atan2(dy, dx)
+            dist = math.sqrt(dx ** 2 + dy ** 2)
+
+            radius = base_radius
+            for order, frac, phase in harmonics:
+                radius += base_radius * frac * math.cos(order * angle + phase)
+
+            if dist < radius:
+                shape[row, col] = True
+
+    # Strong smooth to round all edges (bouba has no sharp points)
+    shape = gaussian_filter(shape.astype(float), sigma=1.8) > 0.5
+
+    return shape
+
+
+def create_spiky_bouba(grid_size: int, seed: int = None) -> np.ndarray:
+    """Create a rounded star / spiky bouba shape with many pronounced lobes.
+
+    Uses a dominant high-order harmonic to produce 4-6 star points, plus
+    secondary harmonics for irregularity. Gaussian smoothing rounds the tips
+    so there are no sharp corners — it reads as a bumpy, organic star shape.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    shape = np.zeros((grid_size, grid_size), dtype=bool)
+    offset_range = max(1, grid_size // 8)
+    center_x = grid_size // 2 + np.random.randint(-offset_range, offset_range + 1)
+    center_y = grid_size // 2 + np.random.randint(-offset_range, offset_range + 1)
+
+    base_radius = grid_size / 4.5
+
+    phases = np.random.uniform(0, 2 * math.pi, 5)
+    num_points = np.random.randint(4, 7)  # 4-6 star lobes
+
+    harmonics = [
+        (num_points,     0.42, phases[0]),  # Primary star points — large amplitude
+        (num_points + 2, 0.14, phases[1]),  # Extra bumps between main lobes
+        (num_points - 1, 0.12, phases[2]),  # Secondary asymmetric modulation
+        (2,              0.08, phases[3]),  # Broad tilt / off-centre feel
+        (7,              0.05, phases[4]),  # Fine-detail texture
+    ]
+
+    for row in range(grid_size):
+        for col in range(grid_size):
+            dx = col - center_x
+            dy = row - center_y
+            angle = math.atan2(dy, dx)
+            dist = math.sqrt(dx ** 2 + dy ** 2)
+
+            radius = base_radius
+            for order, frac, phase in harmonics:
+                radius += base_radius * frac * math.cos(order * angle + phase)
+
+            if dist < radius:
+                shape[row, col] = True
+
+    # Light smooth — enough to round tips without collapsing the star shape
+    shape = gaussian_filter(shape.astype(float), sigma=1.0) > 0.5
+
+    return shape
+
+
 def create_multi_region(grid_size: int, seed: int = None) -> np.ndarray:
     """Create multiple separate regions (lesions/tumors)."""
     if seed is not None:
@@ -200,6 +298,8 @@ def generate_shape(shape_type: str, grid_size: int, seed: int = None) -> np.ndar
         "kidney": create_kidney,
         "liver": create_liver,
         "heart": create_heart,
+        "bouba": create_bouba,
+        "spiky_bouba": create_spiky_bouba,
         "multi": create_multi_region
     }
 

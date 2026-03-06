@@ -4,7 +4,7 @@ import pygame
 from typing import Optional
 import game.constants as constants
 from game.constants import (
-    DIFFICULTY_ORDER, DIFFICULTY_SETTINGS,
+    DIFFICULTY_ORDER,
     COLOR_TEXT, COLOR_TEXT_HIGHLIGHT
 )
 
@@ -16,6 +16,7 @@ class MainMenu:
         self.renderer = renderer
         self.buttons = []
         self.selected_difficulty: Optional[str] = None
+        self.load_scores_button = None
 
     def _create_buttons(self):
         """Create menu buttons based on current window size."""
@@ -31,33 +32,25 @@ class MainMenu:
         self.title_pos = (w // 2, int(h * 0.12))
         self.subtitle_pos = (w // 2, int(h * 0.18))
 
-        # Play button
-        start_y = int(h * 0.28)
-        play_rect = pygame.Rect(
-            w // 2 - btn_w // 2,
-            start_y,
-            btn_w,
-            btn_h
-        )
-        self.buttons.append(("play", play_rect, "Play Game"))
+        # Buttons: Play, PET Introduction, Tutorial, Quit
+        start_y = int(h * 0.26)
+        button_defs = [
+            ("play",      "Play Game"),
+            ("tutorial",  "How to Play"),
+            ("pet_intro", "PET Introduction"),
+            ("quit",      "Quit"),
+        ]
+        for i, (action, label) in enumerate(button_defs):
+            rect = pygame.Rect(
+                w // 2 - btn_w // 2,
+                start_y + i * (btn_h + btn_spacing),
+                btn_w,
+                btn_h
+            )
+            self.buttons.append((action, rect, label))
 
-        # Tutorial button
-        tutorial_rect = pygame.Rect(
-            w // 2 - btn_w // 2,
-            start_y + btn_h + btn_spacing,
-            btn_w,
-            btn_h
-        )
-        self.buttons.append(("tutorial", tutorial_rect, "Tutorial"))
-
-        # Quit button
-        quit_rect = pygame.Rect(
-            w // 2 - btn_w // 2,
-            start_y + 2 * (btn_h + btn_spacing),
-            btn_w,
-            btn_h
-        )
-        self.buttons.append(("quit", quit_rect, "Quit"))
+        # Small "Load Scores" button at lower-left
+        self.load_scores_button = pygame.Rect(20, h - btn_h - 20, 140, btn_h)
 
     def handle_event(self, event: pygame.event.Event) -> Optional[str]:
         """Handle input events. Returns action string if button clicked."""
@@ -66,6 +59,8 @@ class MainMenu:
             for action, rect, _ in self.buttons:
                 if rect.collidepoint(mouse_pos):
                     return action
+            if self.load_scores_button and self.load_scores_button.collidepoint(mouse_pos):
+                return "load_scores"
         return None
 
     def draw(self):
@@ -87,7 +82,7 @@ class MainMenu:
 
         # Subtitle
         self.renderer.draw_text(
-            "A PET Imaging Educational Game",
+            "A PET Imaging Game",
             self.subtitle_pos,
             COLOR_TEXT,
             font_size="small",
@@ -99,6 +94,11 @@ class MainMenu:
         for action, rect, text in self.buttons:
             hovered = rect.collidepoint(mouse_pos)
             self.renderer.draw_button(rect, text, hovered)
+
+        # Load Scores button (lower-left)
+        if self.load_scores_button:
+            hovered = self.load_scores_button.collidepoint(mouse_pos)
+            self.renderer.draw_button(self.load_scores_button, "Load Scores", hovered)
 
 
 class DifficultySelect:
@@ -186,17 +186,6 @@ class DifficultySelect:
         for difficulty, rect in self.buttons:
             hovered = rect.collidepoint(mouse_pos)
             self.renderer.draw_button(rect, difficulty, hovered)
-
-            # Draw description below button
-            settings = DIFFICULTY_SETTINGS[difficulty]
-            desc_y = rect.bottom + 5
-            self.renderer.draw_text(
-                settings["description"],
-                (w // 2, desc_y),
-                (150, 150, 160),
-                font_size="small",
-                center=True
-            )
 
         # Back button
         hovered = self.back_button.collidepoint(mouse_pos)

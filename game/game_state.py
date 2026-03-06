@@ -23,12 +23,16 @@ from game.ui.tutorial import Tutorial
 from game.ui.hud import HUD
 from game.ui.end_screen import EndScreen, CorrectionPhase
 from game.ui.calibration import CalibrationPhase
+from game.ui.name_entry import NameEntry
+from game.ui.dialogs import SaveDialog, LoadDialog
+from game.scoreboard import Scoreboard
 
 
 class GameState(Enum):
     """Game state enumeration."""
     MENU = auto()
     DIFFICULTY_SELECT = auto()
+    NAME_ENTRY = auto()
     TUTORIAL = auto()
     TRANSITIONING = auto()
     CALIBRATION = auto()
@@ -36,6 +40,8 @@ class GameState(Enum):
     PLAYING = auto()
     CORRECTION = auto()
     RESULTS = auto()
+    SAVE_PROMPT = auto()
+    LOAD_SCORES = auto()
 
 
 class Game:
@@ -43,7 +49,7 @@ class Game:
 
     def __init__(self):
         pygame.init()
-        pygame.display.set_caption("GuessTheSignal - PET Educational Game")
+        pygame.display.set_caption("GuessTheSignal - PET Imaging Game")
 
         # Calculate window size based on screen resolution
         display_info = pygame.display.Info()
@@ -89,6 +95,13 @@ class Game:
         self.hud = HUD(self.renderer)
         self.end_screen = EndScreen(self.renderer)
         self.correction_ui = CorrectionPhase(self.renderer)
+        self.name_entry = NameEntry(self.renderer)
+        self.save_dialog = SaveDialog(self.renderer)
+        self.load_dialog = LoadDialog(self.renderer)
+
+        # Scoreboard
+        self.scoreboard = Scoreboard()
+        self.player_name = ""
 
         # Game state
         self.state = GameState.MENU
@@ -248,21 +261,75 @@ class Game:
                 if action == "play":
                     self.from_tutorial = False
                     self.state = GameState.DIFFICULTY_SELECT
-                elif action == "tutorial":
+                elif action == "pet_intro":
                     self.tutorial.current_page = 0
+                    self.tutorial.active_tab = 0
                     self.from_tutorial = True
                     self.state = GameState.TUTORIAL
+                elif action == "tutorial":
+                    self.tutorial.active_tab = 1
+                    self.tutorial.gameplay_anim_started = False
+                    self.from_tutorial = True
+                    self.state = GameState.TUTORIAL
+                elif action == "load_scores":
+                    self.load_dialog.reset()
+                    self.state = GameState.LOAD_SCORES
                 elif action == "quit":
-                    self.running = False
+                    if self.scoreboard.has_scores():
+                        self.save_dialog.reset()
+                        self.state = GameState.SAVE_PROMPT
+                    else:
+                        self.running = False
 
             elif self.state == GameState.DIFFICULTY_SELECT:
                 action = self.difficulty_select.handle_event(event)
                 if action == "back":
                     self.state = GameState.MENU
                 elif action in DIFFICULTY_SETTINGS:
-                    self._transition_start = pygame.time.get_ticks()
                     self._transition_difficulty = action
+                    self.name_entry.reset(action)
+                    self.state = GameState.NAME_ENTRY
+
+            elif self.state == GameState.NAME_ENTRY:
+                action = self.name_entry.handle_event(event)
+                if action == "start":
+                    self.player_name = self.name_entry.name.strip()
+                    self._transition_start = pygame.time.get_ticks()
                     self.state = GameState.TRANSITIONING
+                elif action == "back":
+                    self.state = GameState.DIFFICULTY_SELECT
+
+            elif self.state == GameState.SAVE_PROMPT:
+                action = self.save_dialog.handle_event(event)
+                if action == "save_quit":
+                    path = self.save_dialog.filepath.strip()
+                    if path:
+                        ok = self.scoreboard.save(path)
+                        if ok:
+                            self.running = False
+                        else:
+                            self.save_dialog._error = "Could not save. Check the path and try again."
+                    else:
+                        self.save_dialog._error = "Please enter a file path"
+                elif action == "quit":
+                    self.running = False
+                elif action == "cancel":
+                    self.state = GameState.MENU
+
+            elif self.state == GameState.LOAD_SCORES:
+                action = self.load_dialog.handle_event(event)
+                if action == "load":
+                    path = self.load_dialog.filepath.strip()
+                    if path:
+                        ok = self.scoreboard.load(path)
+                        if ok:
+                            self.state = GameState.MENU
+                        else:
+                            self.load_dialog.set_error("Could not load. Check the path and file format.")
+                    else:
+                        self.load_dialog.set_error("Please enter a file path")
+                elif action == "cancel":
+                    self.state = GameState.MENU
 
             elif self.state == GameState.TUTORIAL:
                 action = self.tutorial.handle_event(event)
@@ -297,6 +364,17 @@ class Game:
                 action = self.correction_ui.handle_event(event)
                 if action == "finalize":
                     self._calculate_results()
+                    if self.current_difficulty and self.player_name:
+                        self.scoreboard.add_score(
+                            self.current_difficulty,
+                            self.player_name,
+                            self.end_screen.dice_score
+                        )
+                    self.end_screen.set_scoreboard(
+                        self.scoreboard.get_scores(self.current_difficulty or ""),
+                        self.player_name,
+                        self.end_screen.dice_score
+                    )
                     self.state = GameState.RESULTS
                 elif action == "clear":
                     self.image_matrix.clear_guesses()
@@ -314,7 +392,9 @@ class Game:
                 action = self.end_screen.handle_event(event)
                 if action == "play_again":
                     if self.current_difficulty:
-                        self.start_game(self.current_difficulty)
+                        self.name_entry.reset(self.current_difficulty)
+                        self._transition_difficulty = self.current_difficulty
+                        self.state = GameState.NAME_ENTRY
                 elif action == "menu":
                     # Reset tutorial flag when going back to menu
                     self.from_tutorial = False
@@ -399,11 +479,24 @@ class Game:
 
     def draw(self):
         """Draw the current game state."""
+        current_time = pygame.time.get_ticks()
+
         if self.state == GameState.MENU:
             self.main_menu.draw()
 
         elif self.state == GameState.DIFFICULTY_SELECT:
             self.difficulty_select.draw()
+
+        elif self.state == GameState.NAME_ENTRY:
+            self.name_entry.draw(current_time)
+
+        elif self.state == GameState.SAVE_PROMPT:
+            self.main_menu.draw()
+            self.save_dialog.draw(current_time)
+
+        elif self.state == GameState.LOAD_SCORES:
+            self.main_menu.draw()
+            self.load_dialog.draw(current_time)
 
         elif self.state == GameState.TUTORIAL:
             self.tutorial.draw()

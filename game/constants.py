@@ -30,31 +30,26 @@ DIFFICULTY_SETTINGS = {
         "grid_size": 10,
         "detectors": 64,
         "shape_type": "blob",
-        "description": "Simple blob shape, 10x10 grid"
     },
     "Easy": {
         "grid_size": 14,
         "detectors": 64,
-        "shape_type": "kidney",
-        "description": "Kidney shape, 14x14 grid"
+        "shape_type": "bouba",
     },
     "Medium": {
         "grid_size": 18,
         "detectors": 64,
-        "shape_type": "liver",
-        "description": "Liver shape, 18x18 grid"
+        "shape_type": "bouba",
     },
     "Hard": {
         "grid_size": 24,
         "detectors": 64,
-        "shape_type": "heart",
-        "description": "Heart shape, 24x24 grid"
+        "shape_type": "spiky_bouba",
     },
     "Expert": {
         "grid_size": 32,
         "detectors": 64,
         "shape_type": "multi",
-        "description": "Multiple regions, 32x32 grid"
     }
 }
 

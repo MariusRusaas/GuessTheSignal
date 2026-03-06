@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GuessTheSignal - A PET Imaging Educational Game
+GuessTheSignal - A PET Imaging Game
 
 Learn about Positron Emission Tomography (PET) through interactive gameplay.
 Use Lines of Response (LOR) and Time-of-Flight (TOF) information to

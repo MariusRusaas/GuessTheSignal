@@ -1,8 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m py_compile:*)",
-      "Bash(python main.py:*)"
+      "Bash(\"C:\\\\Users\\\\au780656\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python312\\\\python.exe\":*)"
     ]
   }
 }

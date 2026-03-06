@@ -1,1 +1,1 @@
-# GuessTheSignal - PET Educational Game
+# GuessTheSignal - PET Imaging Game

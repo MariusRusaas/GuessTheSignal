@@ -29,9 +29,12 @@ class HUD:
 
         self.rect = pygame.Rect(0, 0, w, hud_h)
 
+        btn_h = hud_h - 28                      # fills HUD minus top/bottom margin
+        btn_w = max(80, int(w * 0.08))
         self.pause_button = pygame.Rect(
-            w - 100, 20,
-            80, 40
+            w - btn_w - 12,
+            (hud_h - btn_h) // 2,
+            btn_w, btn_h
         )
 
     def reset(self):
@@ -131,11 +134,14 @@ class HUD:
         hovered = self.pause_button.collidepoint(mouse_pos)
         self.renderer.draw_button(self.pause_button, "Menu", hovered)
 
-        # Instructions hint
+        # Instructions hint — centred in the space between progress bar and button
         hint = "Click grid to mark guesses" if not self.is_correction_phase else "Click to toggle pixels, then Finalize"
+        bar_right = w // 2 + int(w * 0.085)
+        hint_cx = (bar_right + self.pause_button.left) // 2
         self.renderer.draw_text(
             hint,
-            (w - hud_pad - 300, hud_h - 25),
+            (hint_cx, hud_h // 2),
             (120, 120, 130),
-            font_size="small"
+            font_size="small",
+            center=True
         )

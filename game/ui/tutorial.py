@@ -39,59 +39,42 @@ TUTORIAL_PAGES = [
     {
         "title": "Positron Annihilation",
         "content": [
-            "When a positron meets an electron, they annihilate each other.",
+            "When a positron meets an electron,",
+            "they annihilate each other.",
             "",
-            "This produces TWO gamma photons that travel in OPPOSITE directions",
-            "(180 degrees apart) at the speed of light.",
-            "",
-            "In this game, the hidden shape represents regions with radioactive",
-            "tracer. Positrons are emitted from the edges of these regions."
+            "This produces TWO gamma photons that travel",
+            "in OPPOSITE directions (180° apart)",
+            "at the speed of light."
         ],
         "animation": "annihilation"
     },
     {
         "title": "Lines of Response (LOR)",
         "content": [
-            "Watch the detector ring: an annihilation event occurs,",
-            "and two photons travel to opposite detectors.",
+            "An annihilation event occurs and two photons",
+            "travel to opposite detectors.",
             "",
             "The line connecting the hit detectors is called",
             "the Line of Response (LOR).",
             "",
-            "The true emission position is somewhere on this line!"
+            "The emission position lies somewhere on this line."
         ],
         "animation": "lor"
     },
     {
         "title": "Time of Flight (TOF)",
         "content": [
-            "Now watch an OFF-CENTER annihilation.",
+            "For an off-centre annihilation, the photon",
+            "traveling to the CLOSER detector arrives FIRST.",
             "",
-            "The photon traveling to the CLOSER detector arrives FIRST!",
-            "This timing difference helps narrow down the position.",
+            "This small timing difference localises the",
+            "emission along the LOR.",
             "",
-            "The colored region shows likely positions based on timing.",
-            "Use this to estimate where the emission occurred!"
+            "The coloured region shows the probable",
+            "emission positions based on the timing."
         ],
         "animation": "tof"
     },
-    {
-        "title": "How to Play",
-        "content": [
-            "1. Watch the detector ring - two detectors will blink",
-            "   (the closer one first due to TOF)",
-            "",
-            "2. Use the timing difference to estimate the position",
-            "",
-            "3. Click on the grid to mark your guesses",
-            "",
-            "4. After all emissions, refine your guesses",
-            "",
-            "5. Your score is based on how well your guess",
-            "   matches the true shape (DICE coefficient)"
-        ],
-        "animation": None
-    }
 ]
 
 
@@ -570,6 +553,13 @@ class InjectionAnimation:
         # Select zoom target
         self.zoom_target_mol = self.molecules[5]  # Center abdomen molecule
 
+        # Reset all decay-related state so a replay starts clean
+        self.f18_flash_intensity = 0.0
+        self.flash_buildup = 0.0
+        self.positron_ejected = False
+        self.positron_progress = 0.0
+        self.decay_complete = False
+
         # Start at zoom phase
         self.phase = self.PHASE_ZOOM
         self.phase_start_time = current_time
@@ -740,6 +730,352 @@ class AnnihilationAnimation:
         return self.phase == self.PHASE_COMPLETE
 
 
+class GameplayTutorialAnim:
+    """Animated simulation of a complete Easy-mode game for the Tutorial tab."""
+
+    PHASE_IDLE = 0
+    PHASE_GENERATE = 1    # Shape appears brightly on grid (1.5s)
+    PHASE_DIM = 2         # Shape dims to barely visible (2.5s)
+    PHASE_EMISSION = 3    # Cycle through edge pixels with mouse animation
+    PHASE_FINAL_MSG = 4   # Brief transition message before correction
+    PHASE_CORRECTION = 5  # Correction phase demo (remove wrong, add missing)
+    PHASE_DONE = 6        # Final static message
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.phase = self.PHASE_IDLE
+        self.phase_start = 0
+        self.grid_size = 14
+        self.shape = None            # 2-D bool array (grid_size x grid_size)
+        self.edge_pixels = []        # [(row, col), ...]
+        self.revealed_pixels = set()
+        self.emission_idx = 0
+        self.total_emissions = 0
+
+        # Sub-phases within PHASE_EMISSION
+        # 0 = detectors blink + LOR  1 = mouse moves  2 = click+reveal  3 = pause
+        self.sub_phase = 0
+        self.sub_phase_start = 0
+
+        # Mouse cursor (screen coords)
+        self.mouse_x = 0.0
+        self.mouse_y = 0.0
+        self._mouse_start_x = 0.0
+        self._mouse_start_y = 0.0
+        self.mouse_target_x = 0.0
+        self.mouse_target_y = 0.0
+
+        # Detector blink state
+        self.det1_idx = 0
+        self.det2_idx = 0
+        self.det1_blink = 0.0
+        self.det2_blink = 0.0
+        self.lor_alpha = 0
+        self.current_row = 0
+        self.current_col = 0
+
+        # Shape dimming: 0 = bright, 1 = barely visible
+        self.dim_progress = 0.0
+        self.click_alpha = 0.0
+
+        # Correction phase state
+        self.corr_targets = []          # [(row, col, action), ...] action="remove"|"add"
+        self.corr_idx = 0
+        self.corr_total = 0
+        self.corr_current_row = 0
+        self.corr_current_col = 0
+        self.corr_current_action = ""
+        self.corr_wrong_pixels = set()  # wrong revealed pixels to remove
+        self.corr_missing_pixels = set()  # true edge pixels to add
+
+        # Cached layout (updated each frame from Tutorial)
+        self._center = (0, 0)
+        self._ring_radius = 100.0
+        self._pixel_size = 10.0
+        self._grid_top_left = (0.0, 0.0)
+        self._layout_ready = False
+
+    # ------------------------------------------------------------------
+    def start(self, current_time: int):
+        """Generate shape and start the animation."""
+        self.reset()
+        import numpy as np
+        from game.shape_generator import create_kidney, find_edge_pixels, get_edge_pixel_positions
+        import random
+
+        self.shape = create_kidney(self.grid_size, seed=42)
+        edge_mask = find_edge_pixels(self.shape)
+        all_edges = get_edge_pixel_positions(edge_mask)
+
+        # Click all edge pixels; shuffle so order looks random
+        rng = random.Random(42)
+        rng.shuffle(all_edges)
+
+        self.edge_pixels = all_edges
+        self.total_emissions = len(self.edge_pixels)
+        self.phase = self.PHASE_GENERATE
+        self.phase_start = current_time
+
+    # ------------------------------------------------------------------
+    def _emission_interval(self, idx: int) -> float:
+        """Adaptive interval so the total animation takes roughly 15 seconds."""
+        return max(700.0, min(2000.0, 15000.0 / max(1, self.total_emissions)))
+
+    # ------------------------------------------------------------------
+    def update(self, current_time: int, center, ring_radius: float,
+               pixel_size: float, grid_top_left):
+        """Update animation.  Layout params must be supplied every frame."""
+        self._center = center
+        self._ring_radius = ring_radius
+        self._pixel_size = pixel_size
+        self._grid_top_left = grid_top_left
+
+        if self.phase == self.PHASE_IDLE:
+            return
+
+        elapsed = current_time - self.phase_start
+
+        if self.phase == self.PHASE_GENERATE:
+            if elapsed >= 1500:
+                self.phase = self.PHASE_DIM
+                self.phase_start = current_time
+
+        elif self.phase == self.PHASE_DIM:
+            self.dim_progress = min(1.0, elapsed / 2500.0)
+            if elapsed >= 2500:
+                self.phase = self.PHASE_EMISSION
+                self.phase_start = current_time
+                self.emission_idx = 0
+                self.sub_phase = 0
+                self.sub_phase_start = current_time
+                if not self._layout_ready:
+                    self._layout_ready = True
+                    self.mouse_x = grid_top_left[0] - 40.0
+                    self.mouse_y = grid_top_left[1] - 40.0
+                self._setup_emission()
+
+        elif self.phase == self.PHASE_EMISSION:
+            self._update_emission(current_time)
+
+        elif self.phase == self.PHASE_FINAL_MSG:
+            # Auto-transition to correction after 2.5 s
+            if elapsed >= 2500:
+                self._setup_correction()
+                self.phase = self.PHASE_CORRECTION
+                self.phase_start = current_time
+                self.sub_phase = 0
+                self.sub_phase_start = current_time
+
+        elif self.phase == self.PHASE_CORRECTION:
+            self._update_correction(current_time)
+
+        # PHASE_DONE is static — nothing to update
+
+    # ------------------------------------------------------------------
+    def _setup_emission(self):
+        """Prepare state for the current edge-pixel emission."""
+        if self.emission_idx >= self.total_emissions:
+            return
+        row, col = self.edge_pixels[self.emission_idx]
+        self.current_row = row
+        self.current_col = col
+
+        px = self._grid_top_left[0] + col * self._pixel_size + self._pixel_size / 2
+        py = self._grid_top_left[1] + row * self._pixel_size + self._pixel_size / 2
+        self._mouse_start_x = self.mouse_x
+        self._mouse_start_y = self.mouse_y
+        self.mouse_target_x = px
+        self.mouse_target_y = py
+
+        # Detectors: one towards the pixel from the ring center, one opposite
+        cx, cy = self._center
+        dx, dy = px - cx, py - cy
+        angle = math.atan2(dy, dx)
+        num_det = 64
+        det_step = 2 * math.pi / num_det
+        self.det1_idx = round((angle % (2 * math.pi)) / det_step) % num_det
+        self.det2_idx = (self.det1_idx + num_det // 2) % num_det
+
+        self.det1_blink = 0.0
+        self.det2_blink = 0.0
+        self.lor_alpha = 0
+        self.click_alpha = 0.0
+
+    # ------------------------------------------------------------------
+    def _update_emission(self, current_time: int):
+        sub_elapsed = current_time - self.sub_phase_start
+        interval = self._emission_interval(self.emission_idx)
+
+        if self.sub_phase == 0:
+            # Detectors blink, LOR fades in (800 ms)
+            self.det1_blink = min(1.0, sub_elapsed / 200.0)
+            self.det2_blink = min(1.0, max(0.0, sub_elapsed - 150) / 200.0)
+            self.lor_alpha = min(220, int(sub_elapsed / 800.0 * 220))
+            if sub_elapsed >= 800:
+                self.sub_phase = 1
+                self.sub_phase_start = current_time
+
+        elif self.sub_phase == 1:
+            # Mouse glides to pixel
+            move_dur = max(400.0, interval * 0.35)
+            t = min(1.0, sub_elapsed / move_dur)
+            t_ease = 1.0 - (1.0 - t) ** 2          # ease-out
+            self.mouse_x = self._mouse_start_x + (self.mouse_target_x - self._mouse_start_x) * t_ease
+            self.mouse_y = self._mouse_start_y + (self.mouse_target_y - self._mouse_start_y) * t_ease
+            self.lor_alpha = max(0, int(220 * (1.0 - t)))  # LOR fades as mouse approaches
+            if t >= 1.0:
+                self.mouse_x = self.mouse_target_x
+                self.mouse_y = self.mouse_target_y
+                self.sub_phase = 2
+                self.sub_phase_start = current_time
+
+        elif self.sub_phase == 2:
+            # Click flash + pixel revealed (500 ms)
+            self.click_alpha = max(0.0, 1.0 - sub_elapsed / 500.0)
+            if sub_elapsed >= 50:
+                self.revealed_pixels.add((self.current_row, self.current_col))
+            if sub_elapsed >= 500:
+                self.det1_blink = 0.0
+                self.det2_blink = 0.0
+                self.lor_alpha = 0
+                self.click_alpha = 0.0
+                self.sub_phase = 3
+                self.sub_phase_start = current_time
+
+        elif self.sub_phase == 3:
+            # Pause between emissions
+            pause_dur = max(150.0, interval * 0.25)
+            if sub_elapsed >= pause_dur:
+                self.emission_idx += 1
+                if self.emission_idx >= self.total_emissions:
+                    self.phase = self.PHASE_FINAL_MSG
+                    self.phase_start = current_time
+                else:
+                    self.sub_phase = 0
+                    self.sub_phase_start = current_time
+                    self._setup_emission()
+
+    # ------------------------------------------------------------------
+    def _setup_correction(self):
+        """Set up the correction phase demo state."""
+        import random
+        from game.shape_generator import find_edge_pixels, get_edge_pixel_positions
+
+        rng = random.Random(77)
+
+        # All true edge pixels for the shape
+        edge_mask = find_edge_pixels(self.shape)
+        all_true_edge_set = set(get_edge_pixel_positions(edge_mask))
+
+        # Pick the 2 most-interior pixels as "outlier" wrong guesses
+        # (sorted by distance to centroid: closest = deepest inside = most clearly off the edge)
+        interior = [(r, c) for r in range(self.grid_size) for c in range(self.grid_size)
+                    if self.shape[r, c] and (r, c) not in all_true_edge_set]
+        if interior:
+            cr = sum(r for r, c in all_true_edge_set) / len(all_true_edge_set)
+            cc = sum(c for r, c in all_true_edge_set) / len(all_true_edge_set)
+            interior.sort(key=lambda rc: (rc[0] - cr) ** 2 + (rc[1] - cc) ** 2)
+        wrong_pixels = interior[:2] if len(interior) >= 2 else interior[:]
+
+        # Remove 2 correctly revealed edge pixels to simulate gaps in the contour
+        revealed_true = [(r, c) for r, c in self.revealed_pixels if (r, c) in all_true_edge_set]
+        rng.shuffle(revealed_true)
+        missing_pixels = revealed_true[:2] if len(revealed_true) >= 2 else revealed_true[:]
+
+        # Initial correction state: subtract missing, add wrong outliers
+        self.revealed_pixels = (self.revealed_pixels - set(missing_pixels)) | set(wrong_pixels)
+        self.corr_wrong_pixels = set(wrong_pixels)
+        self.corr_missing_pixels = set(missing_pixels)
+
+        # Targets: remove wrong outliers first, then fill gaps
+        self.corr_targets = (
+            [(r, c, "remove") for r, c in wrong_pixels] +
+            [(r, c, "add") for r, c in missing_pixels]
+        )
+        self.corr_idx = 0
+        self.corr_total = len(self.corr_targets)
+
+        if self.corr_total > 0:
+            self._setup_corr_move()
+
+    # ------------------------------------------------------------------
+    def _setup_corr_move(self):
+        """Prepare mouse movement to the current correction target."""
+        row, col, action = self.corr_targets[self.corr_idx]
+        px = self._grid_top_left[0] + col * self._pixel_size + self._pixel_size / 2
+        py = self._grid_top_left[1] + row * self._pixel_size + self._pixel_size / 2
+        self._mouse_start_x = self.mouse_x
+        self._mouse_start_y = self.mouse_y
+        self.mouse_target_x = px
+        self.mouse_target_y = py
+        self.click_alpha = 0.0
+        self.corr_current_row = row
+        self.corr_current_col = col
+        self.corr_current_action = action
+
+    # ------------------------------------------------------------------
+    def _update_correction(self, current_time: int):
+        """Update the correction phase animation."""
+        if self.corr_total == 0:
+            self.phase = self.PHASE_DONE
+            self.phase_start = current_time
+            return
+
+        sub_elapsed = current_time - self.sub_phase_start
+
+        if self.sub_phase == 0:
+            # Mouse moves to target (800 ms)
+            t = min(1.0, sub_elapsed / 800.0)
+            t_ease = 1.0 - (1.0 - t) ** 2
+            self.mouse_x = self._mouse_start_x + (self.mouse_target_x - self._mouse_start_x) * t_ease
+            self.mouse_y = self._mouse_start_y + (self.mouse_target_y - self._mouse_start_y) * t_ease
+            if t >= 1.0:
+                self.mouse_x = self.mouse_target_x
+                self.mouse_y = self.mouse_target_y
+                self.sub_phase = 1
+                self.sub_phase_start = current_time
+
+        elif self.sub_phase == 1:
+            # Click flash + apply correction (500 ms)
+            self.click_alpha = max(0.0, 1.0 - sub_elapsed / 500.0)
+            if sub_elapsed >= 60:
+                key = (self.corr_current_row, self.corr_current_col)
+                if self.corr_current_action == "remove":
+                    self.revealed_pixels.discard(key)
+                    self.corr_wrong_pixels.discard(key)
+                else:
+                    self.revealed_pixels.add(key)
+                    self.corr_missing_pixels.discard(key)
+            if sub_elapsed >= 500:
+                self.click_alpha = 0.0
+                self.sub_phase = 2
+                self.sub_phase_start = current_time
+
+        elif self.sub_phase == 2:
+            # Pause between corrections (400 ms)
+            if sub_elapsed >= 400:
+                self.corr_idx += 1
+                if self.corr_idx >= self.corr_total:
+                    self.phase = self.PHASE_DONE
+                    self.phase_start = current_time
+                else:
+                    self.sub_phase = 0
+                    self.sub_phase_start = current_time
+                    self._setup_corr_move()
+
+    # ------------------------------------------------------------------
+    def get_shape_alpha(self) -> int:
+        """Return alpha (0-255) for drawing the true shape."""
+        if self.phase == self.PHASE_GENERATE:
+            return 220
+        elif self.phase == self.PHASE_DIM:
+            return max(30, int(220 - self.dim_progress * 190))
+        else:
+            return 30   # barely visible during gameplay
+
+
 class Tutorial:
     """Tutorial screen sequence with interactive animations."""
 
@@ -748,11 +1084,17 @@ class Tutorial:
         self.current_page = 0
         self.total_pages = len(TUTORIAL_PAGES)
 
+        # Tab state: 0 = "PET Introduction"  1 = "Tutorial" (gameplay sim)
+        self.active_tab = 0
+        self.gameplay_anim = GameplayTutorialAnim()
+        self.gameplay_anim_started = False
+
         # Animation state
         self.animation = TutorialAnimation()
         self.annihilation_anim = AnnihilationAnimation()
         self.injection_anim = InjectionAnimation()
         self.animation_started = False
+        self.animation_complete_time = 0   # ms when current animation finished (0 = not yet)
         self.last_page = -1
 
         # Buttons will be created dynamically
@@ -761,6 +1103,13 @@ class Tutorial:
         self.skip_button = None
         self.start_button = None
         self.replay_button = None
+        self.tab_intro_btn = None
+        self.tab_tutorial_btn = None
+
+        # Sticky text-box state — prevents text from flashing by too fast
+        self._displayed_headline: Optional[str] = None
+        self._displayed_body: list = []
+        self._displayed_since: int = 0
 
     def _create_buttons(self):
         """Create navigation buttons based on current window size."""
@@ -769,21 +1118,17 @@ class Tutorial:
         btn_w = constants.MENU_BUTTON_WIDTH
         btn_h = constants.MENU_BUTTON_HEIGHT
 
-        button_y = h - 80
+        button_y = h - btn_h - 20
 
-        self.prev_button = pygame.Rect(
-            w // 2 - btn_w - 20,
-            button_y,
-            btn_w // 2,
-            btn_h
-        )
+        # Prev / Replay / Next are equal-width, grouped in the lower centre
+        nav_w = btn_w // 2
+        nav_gap = 16
+        nav_total = 3 * nav_w + 2 * nav_gap
+        nav_left = w // 2 - nav_total // 2
 
-        self.next_button = pygame.Rect(
-            w // 2 + 20 + btn_w // 2,
-            button_y,
-            btn_w // 2,
-            btn_h
-        )
+        self.prev_button = pygame.Rect(nav_left, button_y, nav_w, btn_h)
+        self.replay_button = pygame.Rect(nav_left + nav_w + nav_gap, button_y, nav_w, btn_h)
+        self.next_button = pygame.Rect(nav_left + 2 * (nav_w + nav_gap), button_y, nav_w, btn_h)
 
         self.skip_button = pygame.Rect(
             w - 140,
@@ -792,29 +1137,29 @@ class Tutorial:
             40
         )
 
+        # Start Game sits in the lower-right corner
         self.start_button = pygame.Rect(
-            w // 2 - btn_w // 2,
+            w - btn_w - 20,
             button_y,
             btn_w,
             btn_h
         )
 
-        # Replay button for animation pages
-        self.replay_button = pygame.Rect(
-            20,
-            h - 80,
-            100,
-            btn_h
-        )
+        # Tab buttons at top-left
+        tab_w = max(160, int(w * 0.16))
+        tab_h = 36
+        tab_y = 14
+        self.tab_intro_btn = pygame.Rect(20, tab_y, tab_w, tab_h)
+        self.tab_tutorial_btn = pygame.Rect(28 + tab_w, tab_y, tab_w, tab_h)
 
     def _get_animation_layout(self) -> Tuple[Tuple[float, float], float, float]:
         """Get layout parameters for animation area."""
         w = constants.WINDOW_WIDTH
         h = constants.WINDOW_HEIGHT
 
-        # Animation area is on the right side of the screen
-        anim_center_x = w * 0.65
-        anim_center_y = h * 0.52
+        # Animation area centred in the window
+        anim_center_x = w * 0.5
+        anim_center_y = h * 0.45
 
         # Size based on available space
         anim_size = min(w * 0.35, h * 0.45)
@@ -833,41 +1178,57 @@ class Tutorial:
             if self.skip_button.collidepoint(mouse_pos):
                 return "done"
 
-            # On last page, check start button
-            if self.current_page == self.total_pages - 1:
+            # ---- Tab 1: gameplay tutorial ----
+            if self.active_tab == 1:
+                if self.replay_button.collidepoint(mouse_pos):
+                    self.gameplay_anim_started = False
+                    self._reset_text()
+                    return None
                 if self.start_button.collidepoint(mouse_pos):
                     return "done"
-            else:
-                # Replay button for animation pages
-                page = TUTORIAL_PAGES[self.current_page]
-                if page.get("animation") and self.replay_button.collidepoint(mouse_pos):
-                    self._start_animation()
-                    return None
+                return None
 
-                # Previous button
-                if self.current_page > 0 and self.prev_button.collidepoint(mouse_pos):
-                    self.current_page -= 1
-                    self.animation_started = False
+            # ---- Tab 0: PET introduction ----
+            # Start Game is always available
+            if self.start_button.collidepoint(mouse_pos):
+                return "done"
 
-                # Next button
-                if self.next_button.collidepoint(mouse_pos):
-                    self.current_page += 1
-                    self.animation_started = False
+            # Replay (animation pages only)
+            page = TUTORIAL_PAGES[self.current_page]
+            if page.get("animation") and self.replay_button.collidepoint(mouse_pos):
+                self._start_animation()
+                return None
 
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_LEFT and self.current_page > 0:
+            # Previous button
+            if self.current_page > 0 and self.prev_button.collidepoint(mouse_pos):
                 self.current_page -= 1
                 self.animation_started = False
-            elif event.key == pygame.K_RIGHT and self.current_page < self.total_pages - 1:
+                self._reset_text()
+
+            # Next button (not on last page)
+            if self.current_page < self.total_pages - 1 and self.next_button.collidepoint(mouse_pos):
                 self.current_page += 1
                 self.animation_started = False
-            elif event.key == pygame.K_ESCAPE:
+                self._reset_text()
+
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
                 return "done"
-            elif event.key == pygame.K_SPACE:
-                # Space to replay animation
-                page = TUTORIAL_PAGES[self.current_page]
-                if page.get("animation"):
-                    self._start_animation()
+            elif self.active_tab == 0:
+                if event.key == pygame.K_LEFT and self.current_page > 0:
+                    self.current_page -= 1
+                    self.animation_started = False
+                    self._reset_text()
+                elif event.key == pygame.K_RIGHT and self.current_page < self.total_pages - 1:
+                    self.current_page += 1
+                    self.animation_started = False
+                    self._reset_text()
+                elif event.key == pygame.K_SPACE:
+                    page = TUTORIAL_PAGES[self.current_page]
+                    if page.get("animation"):
+                        self._start_animation()
+            elif self.active_tab == 1 and event.key == pygame.K_SPACE:
+                self.gameplay_anim_started = False
 
         return None
 
@@ -891,16 +1252,30 @@ class Tutorial:
                 self.animation.start(center, ring_radius, is_centered, current_time)
 
             self.animation_started = True
+            self.animation_complete_time = 0
+            self._reset_text()
 
     def draw(self):
-        """Draw the current tutorial page."""
+        """Draw the current tutorial page (dispatches on active_tab)."""
         self._create_buttons()
         self.renderer.clear()
+        self.renderer.draw_intro_background(alpha=60)
 
         w = constants.WINDOW_WIDTH
         h = constants.WINDOW_HEIGHT
         current_time = pygame.time.get_ticks()
+        mouse_pos = pygame.mouse.get_pos()
 
+        # Skip button (always visible)
+        hovered = self.skip_button.collidepoint(mouse_pos)
+        self.renderer.draw_button(self.skip_button, "Skip", hovered)
+
+        # ---- Tab 1: Gameplay Tutorial simulation ----
+        if self.active_tab == 1:
+            self._draw_gameplay_tutorial(current_time)
+            return
+
+        # ---- Tab 0: PET Introduction ----
         page = TUTORIAL_PAGES[self.current_page]
         has_animation = page.get("animation") is not None
 
@@ -908,35 +1283,26 @@ class Tutorial:
         if has_animation and not self.animation_started:
             self._start_animation()
 
-        # Update animation
+        # Update animation + auto-replay after 10 s of idle
         anim_type = page.get("animation")
         if has_animation and self.animation_started:
             if anim_type in ("injection", "decay"):
                 self.injection_anim.update(current_time)
+                is_done = self.injection_anim.is_complete()
             elif anim_type == "annihilation":
                 self.annihilation_anim.update(current_time)
+                is_done = self.annihilation_anim.is_complete()
             else:
                 self.animation.update(current_time)
+                is_done = self.animation.is_complete()
 
-        # Title
-        self.renderer.draw_text(
-            page["title"],
-            (w // 2, int(h * 0.06)),
-            COLOR_TEXT_HIGHLIGHT,
-            font_size="large",
-            center=True
-        )
+            if is_done:
+                if self.animation_complete_time == 0:
+                    self.animation_complete_time = current_time
+                elif current_time - self.animation_complete_time >= 10_000:
+                    self._start_animation()
 
-        # Page indicator
-        self.renderer.draw_text(
-            f"Page {self.current_page + 1} of {self.total_pages}",
-            (w // 2, int(h * 0.11)),
-            (120, 120, 130),
-            font_size="small",
-            center=True
-        )
-
-        # Draw animation area for pages with animations
+        # Draw animation
         if has_animation:
             if anim_type in ("injection", "decay"):
                 self._draw_injection_animation(current_time)
@@ -945,61 +1311,392 @@ class Tutorial:
             else:
                 self._draw_animation(current_time)
 
-            # Content on the left side for animation pages
-            content_x = int(w * 0.03)
-            start_y = int(h * 0.18)
-            line_height = int(h * 0.038)
-
-            for i, line in enumerate(page["content"]):
-                self.renderer.draw_text(
-                    line,
-                    (content_x, start_y + i * line_height),
-                    COLOR_TEXT,
-                    font_size="small",
-                    center=False
-                )
-        else:
-            # Standard centered content for non-animation pages
-            start_y = int(h * 0.20)
-            line_height = int(h * 0.04)
-            for i, line in enumerate(page["content"]):
-                self.renderer.draw_text(
-                    line,
-                    (w // 2, start_y + i * line_height),
-                    COLOR_TEXT,
-                    font_size="small",
-                    center=True
-                )
+            # Contextual text box — min 3 s display before switching
+            headline, body = self._get_animation_text(anim_type)
+            headline, body = self._maybe_update_text(headline, body, current_time)
+            if headline:
+                self._draw_text_box(headline, body)
 
         # Navigation buttons
-        mouse_pos = pygame.mouse.get_pos()
+        is_last = (self.current_page == self.total_pages - 1)
 
-        # Skip button (always visible)
-        hovered = self.skip_button.collidepoint(mouse_pos)
-        self.renderer.draw_button(self.skip_button, "Skip", hovered)
+        # Prev (all pages except first)
+        if self.current_page > 0:
+            hovered = self.prev_button.collidepoint(mouse_pos)
+            self.renderer.draw_button(self.prev_button, "< Prev", hovered)
 
-        if self.current_page == self.total_pages - 1:
-            # Start button on last page
-            hovered = self.start_button.collidepoint(mouse_pos)
-            self.renderer.draw_button(
-                self.start_button, "Start Game", hovered,
-                color=(60, 120, 80),
-                hover_color=(80, 150, 100)
-            )
-        else:
-            # Previous button
-            if self.current_page > 0:
-                hovered = self.prev_button.collidepoint(mouse_pos)
-                self.renderer.draw_button(self.prev_button, "< Prev", hovered)
+        # Replay (centred, all animation pages)
+        if has_animation:
+            hovered = self.replay_button.collidepoint(mouse_pos)
+            self.renderer.draw_button(self.replay_button, "Replay", hovered)
 
-            # Next button
+        # Next (all pages except last)
+        if not is_last:
             hovered = self.next_button.collidepoint(mouse_pos)
             self.renderer.draw_button(self.next_button, "Next >", hovered)
 
-            # Replay button for animation pages
-            if has_animation:
-                hovered = self.replay_button.collidepoint(mouse_pos)
-                self.renderer.draw_button(self.replay_button, "Replay", hovered)
+        # Start Game – lower-right corner, always visible on every page
+        hovered = self.start_button.collidepoint(mouse_pos)
+        self.renderer.draw_button(
+            self.start_button, "Start Game", hovered,
+            color=(60, 120, 80),
+            hover_color=(80, 150, 100)
+        )
+
+    def _reset_text(self):
+        """Reset sticky text so the next call to _maybe_update_text shows immediately."""
+        self._displayed_headline = None
+        self._displayed_body = []
+        self._displayed_since = 0
+
+    def _maybe_update_text(self, headline, body, current_time):
+        """Only switch the displayed text when 3 s have passed since the last change."""
+        if headline != self._displayed_headline or body != self._displayed_body:
+            if self._displayed_headline is None or current_time - self._displayed_since >= 3000:
+                self._displayed_headline = headline
+                self._displayed_body = body if body is not None else []
+                self._displayed_since = current_time
+        return self._displayed_headline, self._displayed_body
+
+    def _draw_text_box(self, headline: str, body_lines: list):
+        """Draw a prominent text box below the animation area."""
+        w = constants.WINDOW_WIDTH
+        h = constants.WINDOW_HEIGHT
+        screen = self.renderer.screen
+
+        self.renderer._update_fonts()
+        hl_h   = self.renderer.font_large.get_height()
+        body_h = self.renderer.font_medium.get_height()
+        n_body = len(body_lines)
+
+        gap      = 10   # gap between headline bottom and first body line top
+        body_gap = 4    # gap between body lines
+        pad_y    = 18   # top and bottom padding inside the box
+
+        # Total height of all text content (using actual pixel heights)
+        content_h = hl_h + (gap + n_body * body_h + max(0, n_body - 1) * body_gap if n_body else 0)
+        box_h = content_h + pad_y * 2
+        box_w = int(w * 0.68)
+        box_x = w // 2 - box_w // 2
+        btn_h = constants.MENU_BUTTON_HEIGHT
+        box_y = h - btn_h - 20 - box_h - 10
+
+        # Background — medium-dark blue-navy, readable but not pitch-black
+        surf = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        surf.fill((45, 55, 100, 210))
+        screen.blit(surf, (box_x, box_y))
+        pygame.draw.rect(screen, (100, 120, 180), (box_x, box_y, box_w, box_h), 2, border_radius=10)
+
+        cx = w // 2
+        # draw_text with center=True treats position as the CENTER of the text rect.
+        # Place headline centre at: box_y + pad_y + hl_h/2  (top of text = box_y + pad_y)
+        hl_center_y = box_y + pad_y + hl_h // 2
+        self.renderer.draw_text(headline, (cx, hl_center_y), (255, 225, 80), font_size="large", center=True)
+
+        if n_body:
+            first_body_center_y = box_y + pad_y + hl_h + gap + body_h // 2
+            for i, line in enumerate(body_lines):
+                y = first_body_center_y + i * (body_h + body_gap)
+                self.renderer.draw_text(line, (cx, y), (210, 215, 235), font_size="medium", center=True)
+
+    def _get_animation_text(self, anim_type: str):
+        """Return (headline, body_lines) describing the current animation phase."""
+        if anim_type in ("injection", "decay"):
+            anim = self.injection_anim
+            I = InjectionAnimation
+            texts = {
+                I.PHASE_INJECTION:     ("Radiotracer injected",
+                                        ["A radioactive tracer (FDG) enters the bloodstream"]),
+                I.PHASE_DISTRIBUTE:    ("Spreading through the body",
+                                        ["The tracer follows blood flow to organs and tissues"]),
+                I.PHASE_PAUSE:         ("Tracer distributed",
+                                        ["F-18 is now spread throughout the body"]),
+                I.PHASE_DIST_COMPLETE: ("Tracer distributed",
+                                        ["F-18 is now spread throughout the body"]),
+                I.PHASE_ZOOM:          ("Zooming in...",
+                                        ["Let's take a close look at a single tracer molecule"]),
+                I.PHASE_VIEW:          ("F-18 tracer molecule",
+                                        ["This atom is unstable — radioactive decay is imminent"]),
+                I.PHASE_DECAY:         ("Radioactive decay!",
+                                        ["F-18 ejects a positron (e+) from its nucleus"]),
+                I.PHASE_COMPLETE:      ("Positron emitted",
+                                        ["The positron (e+) travels outward through the tissue"]),
+            }
+            return texts.get(anim.phase, (None, []))
+
+        elif anim_type == "annihilation":
+            anim = self.annihilation_anim
+            A = AnnihilationAnimation
+            texts = {
+                A.PHASE_POSITRON_APPROACH: ("Positron meets electron",
+                                            ["The emitted positron encounters a nearby electron"]),
+                A.PHASE_FINAL_APPROACH:    ("Mutual attraction",
+                                            ["Opposite charges pull the particles together"]),
+                A.PHASE_FLASH:             ("ANNIHILATION!",
+                                            ["Both particles are destroyed in a burst of energy"]),
+                A.PHASE_PHOTONS:           ("Two gamma photons",
+                                            ["Two photons fly in exactly opposite directions (180°)"]),
+                A.PHASE_COMPLETE:          ("Two gamma photons",
+                                            ["Two photons fly in exactly opposite directions (180°)"]),
+            }
+            return texts.get(anim.phase, (None, []))
+
+        elif anim_type == "lor":
+            if self.animation.should_show_lor():
+                return ("Line of Response (LOR)",
+                        ["The line connecting both detector hits marks the signal path"])
+            else:
+                return ("Signal detected",
+                        ["Two gamma photons travel to opposite detectors"])
+
+        elif anim_type == "tof":
+            if self.animation.should_show_tof():
+                return ("Time of Flight (TOF)",
+                        ["Timing between detector hits localises the source along the LOR"])
+            elif self.animation.should_show_lor():
+                return ("Photon timing",
+                        ["The nearer detector receives its photon slightly earlier"])
+            else:
+                return ("Signal detected",
+                        ["Two gamma photons travel to opposite detectors"])
+
+        return (None, [])
+
+    def _draw_gameplay_tutorial(self, current_time: int):
+        """Draw the full gameplay simulation tutorial on tab 1."""
+        screen = self.renderer.screen
+        w = constants.WINDOW_WIDTH
+        h = constants.WINDOW_HEIGHT
+        mouse_pos = pygame.mouse.get_pos()
+
+        # Start animation automatically when entering the tab
+        if not self.gameplay_anim_started:
+            self.gameplay_anim.start(current_time)
+            self.gameplay_anim_started = True
+
+        # Layout — centred in window, matching other animation pages
+        anim_size = min(w * 0.35, h * 0.45)
+        center_x = w * 0.5
+        center_y = h * 0.45
+        center = (center_x, center_y)
+        ring_radius = anim_size * 0.42
+
+        grid_size = self.gameplay_anim.grid_size
+        matrix_size = anim_size * 0.55
+        pixel_size = matrix_size / grid_size
+        grid_tl = (center_x - matrix_size / 2, center_y - matrix_size / 2)
+
+        # Update animation
+        self.gameplay_anim.update(current_time, center, ring_radius, pixel_size, grid_tl)
+
+        anim = self.gameplay_anim
+
+        # ---- Draw detector ring ----
+        pygame.draw.circle(screen, (180, 180, 190),
+                           (int(center_x), int(center_y)),
+                           int(ring_radius + 14), 2)
+
+        num_det = 64
+        arc_step = 2 * math.pi / num_det
+        inner_r = ring_radius - 10
+        outer_r = ring_radius + 10
+
+        for i in range(num_det):
+            angle = i * arc_step
+            is_hit1 = (i == anim.det1_idx and anim.det1_blink > 0)
+            is_hit2 = (i == anim.det2_idx and anim.det2_blink > 0)
+            bp = anim.det1_blink if is_hit1 else (anim.det2_blink if is_hit2 else 0.0)
+
+            if bp > 0:
+                color = (
+                    int(COLOR_DETECTOR_IDLE[0] + (COLOR_DETECTOR_HIT[0] - COLOR_DETECTOR_IDLE[0]) * bp),
+                    int(COLOR_DETECTOR_IDLE[1] + (COLOR_DETECTOR_HIT[1] - COLOR_DETECTOR_IDLE[1]) * bp),
+                    int(COLOR_DETECTOR_IDLE[2] + (COLOR_DETECTOR_HIT[2] - COLOR_DETECTOR_IDLE[2]) * bp),
+                )
+            else:
+                color = COLOR_DETECTOR_IDLE
+
+            sa = angle - arc_step / 2
+            ea = angle + arc_step / 2
+            pts = []
+            for j in range(5):
+                t = j / 4
+                a = sa + t * (ea - sa)
+                pts.append((center_x + outer_r * math.cos(a), center_y + outer_r * math.sin(a)))
+            for j in range(4, -1, -1):
+                t = j / 4
+                a = sa + t * (ea - sa)
+                pts.append((center_x + inner_r * math.cos(a), center_y + inner_r * math.sin(a)))
+            if len(pts) >= 3:
+                pygame.draw.polygon(screen, color, pts)
+
+        # ---- Draw grid background ----
+        grid_w = grid_h = int(matrix_size)
+        grid_surf = pygame.Surface((grid_w, grid_h), pygame.SRCALPHA)
+        grid_surf.fill((*COLOR_GRID, 160))
+        screen.blit(grid_surf, (int(grid_tl[0]), int(grid_tl[1])))
+        lc = (190, 190, 198)
+        for i in range(grid_size + 1):
+            x = grid_tl[0] + i * pixel_size
+            y = grid_tl[1] + i * pixel_size
+            pygame.draw.line(screen, lc,
+                             (x, grid_tl[1]), (x, grid_tl[1] + matrix_size))
+            pygame.draw.line(screen, lc,
+                             (grid_tl[0], y), (grid_tl[0] + matrix_size, y))
+
+        # ---- Draw true shape (with varying alpha) ----
+        if anim.shape is not None and anim.phase >= GameplayTutorialAnim.PHASE_GENERATE:
+            shape_alpha = anim.get_shape_alpha()
+            cell = max(1, int(pixel_size) - 1)
+            for row in range(grid_size):
+                for col in range(grid_size):
+                    if anim.shape[row, col]:
+                        sx = int(grid_tl[0] + col * pixel_size) + 1
+                        sy = int(grid_tl[1] + row * pixel_size) + 1
+                        s = pygame.Surface((cell, cell), pygame.SRCALPHA)
+                        s.fill((70, 130, 180, shape_alpha))
+                        screen.blit(s, (sx, sy))
+
+        # ---- Draw revealed (guessed) pixels ----
+        cell = max(1, int(pixel_size) - 1)
+        in_correction = anim.phase in (GameplayTutorialAnim.PHASE_CORRECTION,
+                                       GameplayTutorialAnim.PHASE_DONE)
+        for (row, col) in anim.revealed_pixels:
+            sx = int(grid_tl[0] + col * pixel_size) + 1
+            sy = int(grid_tl[1] + row * pixel_size) + 1
+            s = pygame.Surface((cell, cell), pygame.SRCALPHA)
+            if in_correction and (row, col) in anim.corr_wrong_pixels:
+                s.fill((220, 80, 50, 210))   # orange-red: wrong pixel to remove
+            elif in_correction:
+                s.fill((80, 180, 80, 200))   # green: correctly placed pixel
+            else:
+                s.fill((200, 100, 100, 180))  # red: guessed pixel (pre-correction)
+            screen.blit(s, (sx, sy))
+
+        # ---- Highlight current correction target ----
+        if anim.phase == GameplayTutorialAnim.PHASE_CORRECTION and anim.corr_total > 0:
+            if anim.sub_phase == 0 and anim.corr_idx < anim.corr_total:
+                tr = anim.corr_targets[anim.corr_idx][0]
+                tc = anim.corr_targets[anim.corr_idx][1]
+                ta = anim.corr_targets[anim.corr_idx][2]
+                tx = int(grid_tl[0] + tc * pixel_size)
+                ty = int(grid_tl[1] + tr * pixel_size)
+                cs = max(2, int(pixel_size))
+                if ta == "remove":
+                    # Bright outline on wrong pixel
+                    pygame.draw.rect(screen, (255, 200, 50), (tx, ty, cs, cs), 2)
+                else:
+                    # Ghost outline for missing pixel
+                    ghost = pygame.Surface((cs, cs), pygame.SRCALPHA)
+                    ghost.fill((80, 180, 80, 60))
+                    screen.blit(ghost, (tx, ty))
+                    pygame.draw.rect(screen, (80, 200, 80), (tx, ty, cs, cs), 2)
+
+        # ---- Draw LOR line ----
+        if anim.lor_alpha > 0 and anim.phase == GameplayTutorialAnim.PHASE_EMISSION:
+            det1_angle = anim.det1_idx * (2 * math.pi / num_det)
+            det2_angle = anim.det2_idx * (2 * math.pi / num_det)
+            p1 = (center_x + ring_radius * math.cos(det1_angle),
+                  center_y + ring_radius * math.sin(det1_angle))
+            p2 = (center_x + ring_radius * math.cos(det2_angle),
+                  center_y + ring_radius * math.sin(det2_angle))
+            lor_surf = pygame.Surface((w, h), pygame.SRCALPHA)
+            pygame.draw.line(lor_surf, (255, 200, 50, anim.lor_alpha),
+                             (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), 2)
+            screen.blit(lor_surf, (0, 0))
+
+        # ---- Draw click flash ----
+        showing_mouse = anim.phase in (GameplayTutorialAnim.PHASE_EMISSION,
+                                       GameplayTutorialAnim.PHASE_CORRECTION)
+        if anim.click_alpha > 0 and showing_mouse:
+            if anim.phase == GameplayTutorialAnim.PHASE_EMISSION:
+                flash_col_r, flash_col_c = anim.current_row, anim.current_col
+            else:
+                flash_col_r, flash_col_c = anim.corr_current_row, anim.corr_current_col
+            flash_r = int(pixel_size * 1.5 + 8)
+            tx = int(grid_tl[0] + flash_col_c * pixel_size + pixel_size / 2)
+            ty = int(grid_tl[1] + flash_col_r * pixel_size + pixel_size / 2)
+            fs = pygame.Surface((flash_r * 2, flash_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(fs, (255, 255, 120, int(anim.click_alpha * 200)),
+                               (flash_r, flash_r), flash_r)
+            screen.blit(fs, (tx - flash_r, ty - flash_r))
+
+        # ---- Draw animated mouse cursor ----
+        if showing_mouse:
+            mx, my = int(anim.mouse_x), int(anim.mouse_y)
+            # Arrow cursor shape
+            arrow_pts = [
+                (mx, my), (mx, my + 14), (mx + 4, my + 10),
+                (mx + 7, my + 16), (mx + 9, my + 15),
+                (mx + 6, my + 9), (mx + 11, my + 9),
+            ]
+            pygame.draw.polygon(screen, (255, 255, 255), arrow_pts)
+            pygame.draw.polygon(screen, (40, 40, 40), arrow_pts, 1)
+            # Click circle when arriving
+            if anim.click_alpha > 0:
+                cr = max(4, int(pixel_size * 0.6))
+                csurf = pygame.Surface((cr * 2, cr * 2), pygame.SRCALPHA)
+                pygame.draw.circle(csurf, (255, 200, 50, int(anim.click_alpha * 180)),
+                                   (cr, cr), cr, 2)
+                screen.blit(csurf, (mx - cr, my - cr))
+
+        # ---- Contextual text box ----
+        phase = anim.phase
+        if phase == GameplayTutorialAnim.PHASE_GENERATE:
+            headline = "Shape placed in scanner"
+            body = ["A radioactive shape has been placed in the scanner",
+                    "Only the edge pixels emit gamma photons"]
+        elif phase == GameplayTutorialAnim.PHASE_DIM:
+            headline = "Shape is hidden"
+            body = ["In the real game you cannot see it directly",
+                    "Use the detector signals to reconstruct its edge"]
+        elif phase == GameplayTutorialAnim.PHASE_EMISSION:
+            if anim.sub_phase == 0:
+                headline = "Detectors activated!"
+                body = ["Edge pixels emit pairs of gamma photons in opposite directions",
+                        "Each pair hits two detectors — defining the Line of Response"]
+            else:
+                headline = "Click the source pixel"
+                body = ["Use the timing between blinks to locate the emission along the LOR",
+                        "Click that grid pixel to mark your guess"]
+        elif phase == GameplayTutorialAnim.PHASE_FINAL_MSG:
+            headline = "All signals collected!"
+            body = ["Now see how you can refine your guess..."]
+        elif phase == GameplayTutorialAnim.PHASE_CORRECTION:
+            if anim.corr_idx < anim.corr_total:
+                _, _, action = anim.corr_targets[anim.corr_idx]
+                if action == "remove":
+                    headline = "Remove outlier pixels"
+                    body = ["Click misplaced pixels to remove them",
+                            "They sit inside the shape, not on the edge"]
+                else:
+                    headline = "Close the edge"
+                    body = ["Click empty spots to fill gaps",
+                            "A closed edge contour scores better"]
+            else:
+                headline = "Edge refined!"
+                body = ["The contour is now cleaner and more complete"]
+        elif phase == GameplayTutorialAnim.PHASE_DONE:
+            headline = "Finalize your guess"
+            body = ["When satisfied, click Finalize to score your edge",
+                    "The game measures how well your edge matches the true shape"]
+        else:
+            headline = None
+            body = []
+
+        if headline is not None:
+            headline, body = self._maybe_update_text(headline, body, current_time)
+        if headline:
+            self._draw_text_box(headline, body)
+
+        # ---- Bottom buttons ----
+        # Replay
+        hovered = self.replay_button.collidepoint(mouse_pos)
+        self.renderer.draw_button(self.replay_button, "Replay", hovered)
+        # Start game
+        hovered = self.start_button.collidepoint(mouse_pos)
+        self.renderer.draw_button(self.start_button, "Start Game", hovered,
+                                  color=(60, 120, 80), hover_color=(80, 150, 100))
 
     def _draw_animation(self, current_time: int):
         """Draw the animation area with detector ring and effects."""
@@ -1133,28 +1830,6 @@ class Tutorial:
                            (int(self.animation.detector2_pos[0]), int(self.animation.detector2_pos[1])),
                            3)
 
-            # Draw "Line of Response" label with arrow
-            lor_mid_x = (self.animation.detector1_pos[0] + self.animation.detector2_pos[0]) / 2
-            lor_mid_y = (self.animation.detector1_pos[1] + self.animation.detector2_pos[1]) / 2
-
-            # Offset label to the side
-            label_offset = 60
-            label_x = lor_mid_x + label_offset
-            label_y = lor_mid_y - 30
-
-            # Draw arrow pointing to LOR
-            pygame.draw.line(screen, (150, 110, 0),
-                           (label_x - 10, label_y + 15),
-                           (lor_mid_x + 5, lor_mid_y - 5), 2)
-
-            # Draw label
-            self.renderer.draw_text(
-                "Line of Response",
-                (label_x + 50, label_y),
-                (150, 110, 0),
-                font_size="small",
-                center=True
-            )
 
         # Draw TOF probability distribution
         if self.animation.should_show_tof():
@@ -1229,24 +1904,6 @@ class Tutorial:
             pygame.draw.polygon(violin_surface, (20, 140, 70, 220), polygon_points, 2)
             screen.blit(violin_surface, (0, 0))
 
-        # Draw label for TOF
-        label_x = center[0] + ring_radius + 40
-        label_y = center[1] + 50
-
-        self.renderer.draw_text(
-            "TOF Probability",
-            (label_x, label_y),
-            (20, 140, 70),
-            font_size="small",
-            center=False
-        )
-        self.renderer.draw_text(
-            "Distribution",
-            (label_x, label_y + 20),
-            (20, 140, 70),
-            font_size="small",
-            center=False
-        )
 
     def _draw_annihilation_animation(self, current_time: int):
         """Draw the zoomed-in annihilation animation."""
@@ -1254,9 +1911,9 @@ class Tutorial:
         w = constants.WINDOW_WIDTH
         h = constants.WINDOW_HEIGHT
 
-        # Animation area center (right side of screen)
-        center_x = w * 0.65
-        center_y = h * 0.52
+        # Animation area centred in the window
+        center_x = w * 0.5
+        center_y = h * 0.45
         # Match the frame size used by the other animation pages
         box_size = min(w * 0.32, h * 0.48)
         scale = box_size / 2.2  # Scale for converting normalized coords to screen
@@ -1269,17 +1926,6 @@ class Tutorial:
         # Draw dark red gradient background (inside body tissue)
         self._draw_body_gradient_fast(screen, box_rect)
         pygame.draw.rect(screen, (120, 60, 70), box_rect, 2)  # Visible red border
-
-        # Draw subtle grid lines in background (reddish tint)
-        grid_color = (75, 40, 48)
-        grid_spacing = box_size / 8
-        for i in range(1, 8):
-            # Vertical lines
-            x = box_rect.left + i * grid_spacing
-            pygame.draw.line(screen, grid_color, (x, box_rect.top), (x, box_rect.bottom), 1)
-            # Horizontal lines
-            y = box_rect.top + i * grid_spacing
-            pygame.draw.line(screen, grid_color, (box_rect.left, y), (box_rect.right, y), 1)
 
         anim = self.annihilation_anim
 
@@ -1294,7 +1940,9 @@ class Tutorial:
         if anim.phase >= AnnihilationAnimation.PHASE_FLASH and anim.flash_alpha > 0:
             # Multiple concentric circles for flash effect
             flash_surface = pygame.Surface((int(box_size), int(box_size)), pygame.SRCALPHA)
-            flash_center = (int(box_size / 2), int(box_size / 2))
+            # Flash is centred on the actual meeting point, not the box centre
+            mp_screen = to_screen(*anim.meeting_point)
+            flash_center = (mp_screen[0] - int(box_rect.left), mp_screen[1] - int(box_rect.top))
 
             # Outer glow
             for r_mult in [1.0, 0.7, 0.4]:
@@ -1401,32 +2049,6 @@ class Tutorial:
                                    (trail_end[0] - box_rect.left, trail_end[1] - box_rect.top), 4)
                     screen.blit(trail_surface, (box_rect.left, box_rect.top))
 
-        # Draw "Zoom" label
-        self.renderer.draw_text(
-            "Zoomed View",
-            (center_x, box_rect.top - 15),
-            (120, 120, 140),
-            font_size="small",
-            center=True
-        )
-
-        # Draw phase label
-        phase_labels = {
-            AnnihilationAnimation.PHASE_POSITRON_APPROACH: "Positron approaching electron...",
-            AnnihilationAnimation.PHASE_FINAL_APPROACH: "Particles attracting!",
-            AnnihilationAnimation.PHASE_FLASH: "ANNIHILATION!",
-            AnnihilationAnimation.PHASE_PHOTONS: "Two gamma photons emitted!",
-            AnnihilationAnimation.PHASE_COMPLETE: "Two gamma photons emitted!"
-        }
-        if anim.phase in phase_labels:
-            label_color = (255, 255, 100) if anim.phase == AnnihilationAnimation.PHASE_FLASH else (180, 180, 200)
-            self.renderer.draw_text(
-                phase_labels[anim.phase],
-                (center_x, box_rect.bottom + 25),
-                label_color,
-                font_size="small",
-                center=True
-            )
 
     def _draw_injection_animation(self, current_time: int):
         """Draw the injection/distribution/decay animation."""
@@ -1436,9 +2058,9 @@ class Tutorial:
 
         anim = self.injection_anim
 
-        # Animation area (right side of screen)
-        center_x = w * 0.65
-        center_y = h * 0.52
+        # Animation area centred in the window
+        center_x = w * 0.5
+        center_y = h * 0.45
         box_size = min(w * 0.32, h * 0.55)
 
         # Draw background box
@@ -1500,26 +2122,6 @@ class Tutorial:
         elif anim.phase in [InjectionAnimation.PHASE_VIEW, InjectionAnimation.PHASE_DECAY, InjectionAnimation.PHASE_COMPLETE]:
             self._draw_molecule_view(screen, anim, center_x, center_y, box_size, base_scale, current_time)
 
-        # Draw phase label
-        phase_labels = {
-            InjectionAnimation.PHASE_INJECTION: "Injecting radiotracer...",
-            InjectionAnimation.PHASE_DISTRIBUTE: "Tracer distributing in body...",
-            InjectionAnimation.PHASE_PAUSE: "Tracer distributed throughout body",
-            InjectionAnimation.PHASE_DIST_COMPLETE: "Tracer distributed throughout body",
-            InjectionAnimation.PHASE_ZOOM: "Zooming in on FDG molecule...",
-            InjectionAnimation.PHASE_VIEW: "FDG molecule with F-18 isotope",
-            InjectionAnimation.PHASE_DECAY: "Radioactive decay!",
-            InjectionAnimation.PHASE_COMPLETE: "Positron emitted!"
-        }
-        if anim.phase in phase_labels:
-            label_color = (255, 255, 100) if anim.phase == InjectionAnimation.PHASE_DECAY else (180, 180, 200)
-            self.renderer.draw_text(
-                phase_labels[anim.phase],
-                (center_x, box_rect.bottom + 25),
-                label_color,
-                font_size="small",
-                center=True
-            )
 
     def _draw_body_view(self, screen, anim, center_x, center_y, box_size, scale, to_screen):
         """Draw the anatomical body silhouette with injection and molecule distribution."""
@@ -2005,8 +2607,9 @@ class Tutorial:
         if anim.positron_ejected:
             # Use shared exit angle to connect with annihilation animation
             eject_angle = InjectionAnimation.POSITRON_EXIT_ANGLE
-            # Travel distance increases to exit screen (box_size ensures off-screen)
-            eject_dist = anim.positron_progress * box_size * 1.5
+            # Positron decelerates and stops just outside the red-tinted frame (ease-out)
+            max_travel = box_size * 0.50
+            eject_dist = max_travel * (1.0 - (1.0 - anim.positron_progress) ** 2)
 
             positron_x = f18_x + eject_dist * math.cos(eject_angle)
             positron_y = f18_y + eject_dist * math.sin(eject_angle)
@@ -2022,11 +2625,20 @@ class Tutorial:
             pygame.draw.circle(screen, (255, 100, 100), (int(positron_x), int(positron_y)), p_size)
             pygame.draw.circle(screen, (255, 180, 180), (int(positron_x), int(positron_y)), p_size // 2)
 
-            # Label
+            # Label — white outline so it reads on both the dark box and light exterior
+            label_pos = (positron_x, positron_y - p_size - 10)
+            for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                self.renderer.draw_text(
+                    "e+",
+                    (label_pos[0] + dx, label_pos[1] + dy),
+                    (255, 255, 255),
+                    font_size="small",
+                    center=True
+                )
             self.renderer.draw_text(
                 "e+",
-                (positron_x, positron_y - p_size - 10),
-                (255, 150, 150),
+                label_pos,
+                (180, 20, 20),
                 font_size="small",
                 center=True
             )

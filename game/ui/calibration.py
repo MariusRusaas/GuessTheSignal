@@ -245,7 +245,12 @@ class CalibrationPhase:
 
     def _compute_jump_btn(self) -> None:
         w, h = constants.WINDOW_WIDTH, constants.WINDOW_HEIGHT
-        self._jump_btn = pygame.Rect(w - 180, h - 52, 165, 36)
+        bar_h = 58
+        btn_h = bar_h - 18                          # 40 px, fits inside bar
+        btn_w = max(190, int(w * 0.16))             # scales with window
+        btn_x = w - btn_w - 10
+        btn_y = h - bar_h + (bar_h - btn_h) // 2
+        self._jump_btn = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
 
     # ------------------------------------------------------------------
     # Public interface

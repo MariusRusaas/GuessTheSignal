@@ -77,9 +77,10 @@ class Renderer:
         iw, ih = image.get_size()
         self.screen.blit(image, ((sw - iw) // 2, (sh - ih) // 2))
 
-    def draw_intro_background(self) -> None:
+    def draw_intro_background(self, alpha: int = 110) -> None:
         """Draw IntroImage centred and semi-opaque (menu / selection screens)."""
         if self._intro_bg is not None:
+            self._intro_bg.set_alpha(alpha)
             self._blit_centered(self._intro_bg)
 
     def draw_game_background(self) -> None:
